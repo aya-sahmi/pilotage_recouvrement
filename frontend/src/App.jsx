@@ -611,11 +611,19 @@ function ImportsPage() {
 function ThreeCXPage() {
   const [kpi, setKpi] = useState(null);
   const [calls, setCalls] = useState([]);
+  const [managerStats, setManagerStats] = useState([]);
 
   useEffect(() => {
     apiFetch('/3cx/kpi').then(setKpi).catch(() => setKpi(null));
     apiFetch('/3cx').then((payload) => setCalls(payload || [])).catch(() => setCalls([]));
+    apiFetch('/3cx/gestionnaires')
+      .then((payload) => setManagerStats(Array.isArray(payload) ? payload : []))
+      .catch(() => setManagerStats([]));
   }, []);
+
+  const rankedManagers = [...managerStats].sort((a, b) => (Number(b.total_appels || 0) - Number(a.total_appels || 0)) || (Number(b.duree_total_secondes || 0) - Number(a.duree_total_secondes || 0)));
+  const topThree = rankedManagers.slice(0, 3);
+  const bottomThree = rankedManagers.slice(-3).reverse();
 
   return (
     <>
@@ -627,13 +635,77 @@ function ThreeCXPage() {
       </div>
 
       <div className="mt-6 rounded-3xl border border-white/10 bg-white/5 p-4">
+        <div className="mb-4 flex items-center justify-between gap-3">
+          <h3 className="text-xl font-bold text-white">Statistiques par gestionnaire</h3>
+          <span className="rounded-full border border-cyan-500/40 bg-cyan-500/10 px-2 py-1 text-[10px] uppercase tracking-[0.2em] text-cyan-300">Mois en cours</span>
+        </div>
+
+        <div className="mb-5 grid gap-3 lg:grid-cols-2">
+          <div className="rounded-2xl border border-emerald-500/20 bg-emerald-500/5 p-4">
+            <div className="mb-3 text-xs uppercase tracking-[0.2em] text-emerald-300">Top 3</div>
+            <div className="space-y-2">
+              {topThree.map((manager, index) => (
+                <div key={manager.id || manager.extension_3cx || `${manager.nom}-${index}`} className="flex items-center justify-between rounded-xl border border-white/10 bg-slate-900/40 px-3 py-2 text-sm text-slate-200">
+                  <div>
+                    <div className="font-semibold text-white">#{index + 1} {`${manager.prenom || ''} ${manager.nom || ''}`.trim() || 'Gestionnaire'}</div>
+                    <div className="text-slate-400">Ext. {manager.extension_3cx || '—'}</div>
+                  </div>
+                  <div className="text-right">
+                    <div className="font-bold text-emerald-300">{formatNumber(manager.total_appels || 0)} appels</div>
+                    <div className="text-cyan-300">{formatDuration(manager.duree_total_secondes || 0)}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="rounded-2xl border border-rose-500/20 bg-rose-500/5 p-4">
+            <div className="mb-3 text-xs uppercase tracking-[0.2em] text-rose-300">Alertes / 3 derniers</div>
+            <div className="space-y-2">
+              {bottomThree.map((manager, index) => (
+                <div key={manager.id || manager.extension_3cx || `${manager.nom}-${index}`} className="flex items-center justify-between rounded-xl border border-white/10 bg-slate-900/40 px-3 py-2 text-sm text-slate-200">
+                  <div>
+                    <div className="font-semibold text-white">{`${manager.prenom || ''} ${manager.nom || ''}`.trim() || 'Gestionnaire'}</div>
+                    <div className="text-slate-400">Ext. {manager.extension_3cx || '—'}</div>
+                  </div>
+                  <div className="text-right">
+                    <div className="font-bold text-rose-300">{formatNumber(manager.total_appels || 0)} appels</div>
+                    <div className="text-cyan-300">{formatDuration(manager.duree_total_secondes || 0)}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        <div className="overflow-hidden rounded-2xl border border-white/10 bg-slate-900/40">
+          <div className="grid grid-cols-[1.5fr_0.7fr_0.8fr_0.9fr_0.9fr] gap-3 border-b border-white/10 px-4 py-3 text-[10px] uppercase tracking-[0.2em] text-slate-400">
+            <span>Gestionnaire</span>
+            <span>Extension</span>
+            <span>Appels</span>
+            <span>Durée</span>
+            <span>Moyenne</span>
+          </div>
+          {(rankedManagers || []).map((manager, index) => (
+            <div key={manager.id || manager.extension_3cx || `${manager.nom}-${index}`} className="grid grid-cols-[1.5fr_0.7fr_0.8fr_0.9fr_0.9fr] items-center gap-3 border-b border-white/10 px-4 py-3 text-sm text-slate-200 last:border-b-0">
+              <span className="font-semibold text-white">{`${manager.prenom || ''} ${manager.nom || ''}`.trim() || 'Gestionnaire'}</span>
+              <span>{manager.extension_3cx || '—'}</span>
+              <span>{formatNumber(manager.total_appels || 0)}</span>
+              <span>{formatDuration(manager.duree_total_secondes || 0)}</span>
+              <span>{formatDuration(manager.duree_moyenne_secondes || 0)}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="mt-6 rounded-3xl border border-white/10 bg-white/5 p-4">
         <h3 className="mb-4 text-xl font-bold text-white">Appels récents</h3>
         <div className="space-y-3">
           {calls.slice(0, 8).map((call) => (
             <div key={call.call_id || call.id} className="flex items-center justify-between rounded-2xl border border-white/10 bg-slate-900/40 px-4 py-3 text-sm text-slate-200">
               <div>
                 <div className="font-semibold text-white">{call.numero_client || call.numero_appelant || '—'}</div>
-                <div className="text-slate-400">{call.direction} • {call.statut || 'answered'}</div>
+                <div className="text-slate-400">{call.direction} • {call.statut || 'answered'} • {call.gestionnaire_nom ? `${call.gestionnaire_prenom || ''} ${call.gestionnaire_nom}`.trim() : 'Non rattaché'}</div>
               </div>
               <div className="text-right">
                 <div>{call.date_debut ? new Date(call.date_debut).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) : '—'}</div>

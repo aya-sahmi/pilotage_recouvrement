@@ -25,17 +25,42 @@ async function get3cxGestionnaires(req, res, next) {
     const { rows } = await query(`
       SELECT g.id, g.nom, g.prenom, g.extension_3cx, g.actif,
              COUNT(a.id) AS total_appels,
-             COALESCE(SUM(a.duree_secondes), 0) AS duree_total_appels
+             COALESCE(SUM(a.duree_secondes), 0) AS duree_total_secondes,
+             COALESCE(AVG(a.duree_secondes), 0) AS duree_moyenne_secondes
       FROM gestionnaires g
       LEFT JOIN appels_3cx a ON a.gestionnaire_id = g.id
       WHERE g.actif = TRUE
       GROUP BY g.id, g.nom, g.prenom, g.extension_3cx, g.actif
-      ORDER BY g.nom ASC
+      ORDER BY total_appels DESC, duree_total_secondes DESC, g.nom ASC
       LIMIT 20
     `);
-    res.json({ success: true, data: rows || [] });
+
+    const data = (rows || []).map((row) => ({
+      id: row.id,
+      nom: row.nom || '',
+      prenom: row.prenom || '',
+      extension_3cx: row.extension_3cx || null,
+      total_appels: Number(row.total_appels || 0),
+      duree_total_secondes: Number(row.duree_total_secondes || 0),
+      duree_moyenne_secondes: Number(row.duree_moyenne_secondes || 0),
+    }));
+
+    res.json({ success: true, data });
   } catch (error) {
-    res.json({ success: true, data: mockData.gestionnaires.rows || [] });
+    const fallback = (mockData.threeCx.byManager || []).map((row) => {
+      const [prenom, ...rest] = String(row.name || '').split(' ');
+      return {
+        id: row.id || null,
+        nom: rest.join(' ') || '',
+        prenom: prenom || '',
+        extension_3cx: null,
+        total_appels: Number(row.totalAppels || 0),
+        duree_total_secondes: Number(row.duree || 0),
+        duree_moyenne_secondes: Number(row.duree || 0) / Math.max(Number(row.totalAppels || 1), 1),
+      };
+    });
+
+    res.json({ success: true, data: fallback });
   }
 }
 
