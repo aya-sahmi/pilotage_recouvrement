@@ -17,6 +17,7 @@ let cachedDirectionalCalls = null;
 let cachedDirectionalCallsAt = 0;
 let cachedExtensionMissed = null;
 let cachedExtensionMissedAt = 0;
+let cachedExtensionMissedKey = '';
 
 function getApiBaseUrl() {
   return (process.env.THREECX_API_URL || '').replace(/#.*$/, '').replace(/\/xapi\/v1\/?$/, '').replace(/\/$/, '');
@@ -251,7 +252,9 @@ async function fetchReportRows(reportName, functionName, parameters, token) {
     });
 
     if (!response.ok) {
-      throw new Error(`Le rapport 3CX ${reportName} a répondu ${response.status}.`);
+      const error = new Error(`Le rapport 3CX ${reportName} a répondu ${response.status}.`);
+      error.statusCode = response.status;
+      throw error;
     }
 
     const rows = extractRows(await response.json());
@@ -320,22 +323,34 @@ async function fetchDirectionalCallsFrom3CX() {
 
 async function fetchExtensionMissedFrom3CX() {
   if (!process.env.THREECX_API_URL) return new Map();
-  if (cachedExtensionMissed && Date.now() - cachedExtensionMissedAt < 15000) return cachedExtensionMissed;
-
-  const token = await getAccessToken();
-  const { from, to } = getReportPeriod();
   const groupNumber = String(process.env.THREECX_GROUP_NUMBER || 'GRP2').replace(/'/g, '');
-  const rows = await fetchReportRows(
-    'ReportExtensionStatisticsByGroup',
-    'Pbx.GetExtensionStatisticsByGroupData',
-    `groupNumber='${groupNumber}',periodFrom=${from},periodTo=${to},callArea=0`,
-    token,
-  );
+  const cacheKey = `${getApiBaseUrl()}|${groupNumber}|${process.env.THREECX_PERIOD_FROM || ''}|${process.env.THREECX_PERIOD_TO || ''}`;
+  if (cachedExtensionMissed && cachedExtensionMissedKey === cacheKey && Date.now() - cachedExtensionMissedAt < 15000) return cachedExtensionMissed;
+
+  let rows;
+  try {
+    const token = await getAccessToken();
+    const { from, to } = getReportPeriod();
+    rows = await fetchReportRows(
+      'ReportExtensionStatisticsByGroup',
+      'Pbx.GetExtensionStatisticsByGroupData',
+      `groupNumber='${groupNumber}',periodFrom=${from},periodTo=${to},callArea=0`,
+      token,
+    );
+  } catch (error) {
+    if (error.statusCode !== 401) throw error;
+    console.warn('3CX extension statistics returned 401; using unanswered counts from the inbound report.');
+    cachedExtensionMissed = new Map();
+    cachedExtensionMissedAt = Date.now();
+    cachedExtensionMissedKey = cacheKey;
+    return cachedExtensionMissed;
+  }
 
   cachedExtensionMissed = new Map(rows
     .filter((row) => row.Dn !== null && row.Dn !== undefined)
     .map((row) => [normalizeExtension(row.Dn), Number(row.InboundUnansweredCount || 0)]));
   cachedExtensionMissedAt = Date.now();
+  cachedExtensionMissedKey = cacheKey;
   return cachedExtensionMissed;
 }
 
