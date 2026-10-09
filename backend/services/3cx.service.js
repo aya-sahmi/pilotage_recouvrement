@@ -9,20 +9,56 @@ function normalizeExtension(value) {
   return String(value).trim().replace(/\D/g, '');
 }
 
-function buildHeaders() {
-  const apiKey = process.env.THREECX_API_KEY || '';
-  const headers = {
-    Accept: 'application/json',
-    'Content-Type': 'application/json',
-  };
+let cachedToken = null;
+let cachedTokenExpiresAt = 0;
+let cachedCalls = null;
+let cachedCallsAt = 0;
+let cachedDirectionalCalls = null;
+let cachedDirectionalCallsAt = 0;
+let cachedExtensionMissed = null;
+let cachedExtensionMissedAt = 0;
 
-  if (apiKey) {
-    headers.Authorization = 'Bearer ' + apiKey;
-    headers['X-API-Key'] = apiKey;
-    headers['api-key'] = apiKey;
+function getApiBaseUrl() {
+  return (process.env.THREECX_API_URL || '').replace(/#.*$/, '').replace(/\/xapi\/v1\/?$/, '').replace(/\/$/, '');
+}
+
+async function getAccessToken() {
+  if (process.env.THREECX_CLIENT_ID && process.env.THREECX_CLIENT_SECRET) {
+    if (cachedToken && Date.now() < cachedTokenExpiresAt - 30000) {
+      return cachedToken;
+    }
+
+    const body = new URLSearchParams({
+      grant_type: 'client_credentials',
+      client_id: process.env.THREECX_CLIENT_ID,
+      client_secret: process.env.THREECX_CLIENT_SECRET,
+      scope: 'pbxConfigApi',
+    });
+    const response = await fetch(`${getApiBaseUrl()}/connect/token`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded', Accept: 'application/json' },
+      body,
+    });
+
+    if (!response.ok) {
+      throw new Error(`Authentification 3CX refusée (${response.status}).`);
+    }
+
+    const payload = await response.json();
+    if (!payload.access_token) {
+      throw new Error('La réponse d’authentification 3CX ne contient pas de jeton.');
+    }
+
+    cachedToken = payload.access_token;
+    cachedTokenExpiresAt = Date.now() + Number(payload.expires_in || 300) * 1000;
+    return cachedToken;
   }
 
-  return headers;
+  if (process.env.THREECX_API_KEY) {
+    return process.env.THREECX_API_KEY;
+  }
+
+  throw new Error('Configurez THREECX_CLIENT_ID et THREECX_CLIENT_SECRET pour accéder aux rapports 3CX.');
 }
 
 async function getGestionnairesByExtension() {
@@ -61,6 +97,19 @@ async function getGestionnairesByExtension() {
       }
     }
     return managers;
+  }
+}
+
+async function getGestionnaires() {
+  try {
+    const { rows } = await query(`
+      SELECT id, extension_3cx, nom, prenom
+      FROM gestionnaires
+      WHERE actif = TRUE
+    `);
+    return rows || [];
+  } catch (error) {
+    return mockData.managerRows || [];
   }
 }
 
@@ -138,135 +187,215 @@ function extractRows(payload) {
   return [];
 }
 
-function normalizeCall(row, index) {
+function durationToSeconds(value) {
+  if (typeof value === 'number') return Number.isFinite(value) ? value : 0;
+  const text = String(value || '').trim();
+  if (!text) return 0;
+  if (/^\d+(\.\d+)?$/.test(text)) return Number(text);
+
+  const iso = text.match(/^P(?:(\d+(?:\.\d+)?)D)?(?:T(?:(\d+(?:\.\d+)?)H)?(?:(\d+(?:\.\d+)?)M)?(?:(\d+(?:\.\d+)?)S)?)?$/i);
+  if (iso) {
+    return Number(iso[1] || 0) * 86400 + Number(iso[2] || 0) * 3600 + Number(iso[3] || 0) * 60 + Number(iso[4] || 0);
+  }
+
+  const clock = text.match(/^(\d+):(\d{2}):(\d{2})(?:\.(\d+))?$/);
+  return clock ? Number(clock[1]) * 3600 + Number(clock[2]) * 60 + Number(clock[3]) + Number(`0.${clock[4] || 0}`) : 0;
+}
+
+function normalizeCall(row, index, directionOverride) {
   if (!row || typeof row !== 'object') {
     return null;
   }
 
-  const rawDirection = String(row.direction || row.type || row.call_direction || 'inbound').toLowerCase();
-  const rawStatus = String(row.statut || row.status || row.state || 'answered').toLowerCase();
-  const callId = row.call_id || row.id || row.callId || row.uuid || 'cx-' + (index + 1);
-  const direction = rawDirection.includes('sort') ? 'outbound' : rawDirection.includes('entr') || rawDirection.includes('inbound') ? 'inbound' : 'inbound';
-  const status = rawStatus.includes('miss') || rawStatus.includes('non') || rawStatus.includes('no_') || rawStatus.includes('busy') || rawStatus.includes('failed') ? 'missed' : rawStatus.includes('answer') || rawStatus.includes('repon') || rawStatus.includes('connect') ? 'answered' : 'answered';
-  const startDate = row.date_debut || row.start_time || row.started_at || row.date || row.begin || new Date().toISOString();
+  const rawDirection = String(directionOverride || row.Direction || row.direction || row.type || row.call_direction || 'Inbound').toLowerCase();
+  const rawStatus = String(row.Status || row.statut || row.status || row.state || '').toLowerCase();
+  const callId = row.CallHistoryId || row.CdrId || row.CallId || row.call_id || row.id || row.callId || row.uuid || 'cx-' + (index + 1);
+  const direction = rawDirection.includes('out') || rawDirection.includes('sort') ? 'outbound' : 'inbound';
+  const notAnswered = rawStatus.includes('unanswered') || rawStatus.includes('not answered') || rawStatus.includes('no answer') || rawStatus.includes('miss') || rawStatus.includes('busy') || rawStatus.includes('failed');
+  const answered = typeof row.Answered === 'boolean'
+    ? row.Answered
+    : !notAnswered && (rawStatus.includes('answer') || rawStatus.includes('repon') || rawStatus.includes('connect'));
+  const status = answered ? 'answered' : 'missed';
+  const startDate = row.StartTime || row.date_debut || row.start_time || row.started_at || row.date || row.begin || new Date().toISOString();
+  const extension = direction === 'inbound'
+    ? row.DestinationDn || row.extension || row.extension_number || row.assignee || row.agent
+    : row.SourceDn || row.extension || row.extension_number || row.assignee || row.agent;
+  const caller = row.SourceCallerId || row.numero_appelant || row.caller || row.number_from || row.from || row.SourceDn || '';
+  const called = row.DestinationCallerId || row.DestinationCalleeId || row.numero_destinataire || row.called || row.number_to || row.to || row.DestinationDn || '';
 
   return {
     call_id: callId,
-    extension: row.extension || row.extension_number || row.assignee || row.agent || 'n/a',
+    extension: extension || 'n/a',
     direction,
-    numero_appelant: row.numero_appelant || row.caller || row.number_from || row.from || '',
-    numero_destinataire: row.numero_destinataire || row.called || row.number_to || row.to || '',
-    numero_client: row.numero_client || row.numero_appelant || row.number_from || row.from || '',
+    numero_appelant: caller,
+    numero_destinataire: called,
+    numero_client: direction === 'inbound' ? caller : called,
     date_debut: startDate,
-    date_fin: row.date_fin || row.end_time || row.ended_at || row.date_debut || startDate,
-    duree: Number(row.duree || row.duration || row.call_duration || row.length || 0),
+    date_fin: row.date_fin || row.end_time || row.ended_at || startDate,
+    duree: durationToSeconds(row.TalkingDuration || row.duree || row.duration || row.call_duration || row.length),
+    duree_sonnerie: durationToSeconds(row.RingingDuration || row.duree_sonnerie),
+    duree_totale: durationToSeconds(row.CallDuration || row.duree_totale),
     statut: status,
     gestionnaire_id: row.gestionnaire_id || row.agent_id || row.manager_id || null,
   };
 }
 
+async function fetchReportRows(reportName, functionName, parameters, token) {
+  const pageSize = 100;
+  const allRows = [];
+
+  for (let skip = 0; skip < 20000; skip += pageSize) {
+    const queryParams = new URLSearchParams({ $top: String(pageSize), $skip: String(skip) });
+    const response = await fetch(`${getApiBaseUrl()}/xapi/v1/${reportName}/${functionName}(${parameters})?${queryParams}`, {
+      headers: { Accept: 'application/json', Authorization: `Bearer ${token}` },
+    });
+
+    if (!response.ok) {
+      throw new Error(`Le rapport 3CX ${reportName} a répondu ${response.status}.`);
+    }
+
+    const rows = extractRows(await response.json());
+    allRows.push(...rows);
+    if (rows.length < pageSize) break;
+  }
+
+  return allRows;
+}
+
+function getReportPeriod() {
+  const now = new Date();
+  const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)).toISOString();
+  return {
+    from: encodeURIComponent(process.env.THREECX_PERIOD_FROM || monthStart),
+    to: encodeURIComponent(process.env.THREECX_PERIOD_TO || now.toISOString()),
+  };
+}
+
 async function fetchCallsFrom3CX() {
   const fallbackCalls = Array.isArray(mockData?.threeCx?.calls) ? mockData.threeCx.calls : [];
-  const managers = await getGestionnairesByExtension();
-
   if (!process.env.THREECX_API_URL) {
+    if (process.env.NODE_ENV === 'production') {
+      throw new Error('THREECX_API_URL n’est pas configurée sur le serveur.');
+    }
+    const managers = await getGestionnairesByExtension();
     return fallbackCalls.map((call) => attachManagerToCall(call, managers));
   }
 
-  const baseUrl = process.env.THREECX_API_URL.replace(/\/$/, '').replace(/#.*$/, '');
-  const candidates = [
-    baseUrl + '/api/v1/calls',
-    baseUrl + '/api/v1/call-logs',
-    baseUrl + '/api/v1/call-reports',
-    baseUrl + '/api/v1/inbound-calls',
-    baseUrl + '/api/v1/outbound-calls',
-    baseUrl + '/api/v1/extension-statistic',
-    baseUrl + '/api/v1/extension-statistics',
-    baseUrl + '/api/v1/reports',
-    baseUrl + '/api/v1/reports/call-reports',
-    baseUrl + '/api/v1/reports/inbound-calls',
-    baseUrl + '/api/v1/reports/outbound-calls',
-    baseUrl + '/api/v1/reports/extension-statistic',
-    baseUrl + '/restapi/v1/calls',
-    baseUrl + '/calls',
-  ];
-
-  for (const url of candidates) {
-    try {
-      const response = await fetch(url, {
-        method: 'GET',
-        headers: buildHeaders(),
-      });
-
-      if (!response.ok) {
-        continue;
-      }
-
-      const payload = await response.json();
-      const rows = extractRows(payload);
-
-      if (Array.isArray(rows) && rows.length) {
-        return rows
-          .map((row, index) => attachManagerToCall(normalizeCall(row, index), managers))
-          .filter(Boolean);
-      }
-    } catch (error) {
-      continue;
-    }
+  if (cachedCalls && Date.now() - cachedCallsAt < 15000) {
+    return cachedCalls;
   }
 
-  return fallbackCalls.map((call) => attachManagerToCall(call, managers));
+  const token = await getAccessToken();
+  const { from, to } = getReportPeriod();
+  const journalRows = await fetchReportRows(
+    'ReportCallLogData',
+    'Pbx.GetCallLogData',
+    `periodFrom=${from},periodTo=${to},sourceType=0,sourceFilter='',destinationType=0,destinationFilter='',callsType=0,callTimeFilterType=0,callTimeFilterFrom='0:00:0',callTimeFilterTo='0:00:0',hidePcalls=true`,
+    token,
+  );
+  const managers = await getGestionnairesByExtension();
+  cachedCalls = journalRows.map((row, index) => normalizeCall(row, index)).filter(Boolean)
+    .map((call) => attachManagerToCall(call, managers));
+  cachedCallsAt = Date.now();
+  return cachedCalls;
+}
+
+async function fetchDirectionalCallsFrom3CX() {
+  if (!process.env.THREECX_API_URL) return fetchCallsFrom3CX();
+  if (cachedDirectionalCalls && Date.now() - cachedDirectionalCallsAt < 15000) return cachedDirectionalCalls;
+
+  const token = await getAccessToken();
+  const { from, to } = getReportPeriod();
+  const [inbound, outbound] = await Promise.all([
+    fetchReportRows('ReportInboundCalls', 'Pbx.GetInboundCalls', `periodFrom=${from},periodTo=${to},trunkDns='',callsType=0`, token),
+    fetchReportRows('ReportOutboundCalls', 'Pbx.GetOutboundCalls', `periodFrom=${from},periodTo=${to},trunkDns='',callsType=0`, token),
+  ]);
+  const managers = await getGestionnairesByExtension();
+  cachedDirectionalCalls = [...inbound.map((row, index) => normalizeCall(row, index, 'Inbound')), ...outbound.map((row, index) => normalizeCall(row, inbound.length + index, 'Outbound'))]
+    .filter(Boolean)
+    .map((call) => attachManagerToCall(call, managers));
+  cachedDirectionalCallsAt = Date.now();
+  return cachedDirectionalCalls;
+}
+
+async function fetchExtensionMissedFrom3CX() {
+  if (!process.env.THREECX_API_URL) return new Map();
+  if (cachedExtensionMissed && Date.now() - cachedExtensionMissedAt < 15000) return cachedExtensionMissed;
+
+  const token = await getAccessToken();
+  const { from, to } = getReportPeriod();
+  const groupNumber = String(process.env.THREECX_GROUP_NUMBER || 'GRP2').replace(/'/g, '');
+  const rows = await fetchReportRows(
+    'ReportExtensionStatisticsByGroup',
+    'Pbx.GetExtensionStatisticsByGroupData',
+    `groupNumber='${groupNumber}',periodFrom=${from},periodTo=${to},callArea=0`,
+    token,
+  );
+
+  cachedExtensionMissed = new Map(rows
+    .filter((row) => row.Dn !== null && row.Dn !== undefined)
+    .map((row) => [normalizeExtension(row.Dn), Number(row.InboundUnansweredCount || 0)]));
+  cachedExtensionMissedAt = Date.now();
+  return cachedExtensionMissed;
 }
 
 async function get3CxOverview() {
-  const fallbackOverview = mockData?.threeCx?.kpis || {
-    totalAppels: 0,
-    dureeTotale: 0,
-    tauxRattachement: 0,
-    appelsNonRattaches: 0,
-    appelsSortants: 0,
-    appelsEntrantsRepondues: 0,
-    appelsEntrantsNonRepondues: 0,
+  const [calls, extensionMissed] = await Promise.all([fetchDirectionalCallsFrom3CX(), fetchExtensionMissedFrom3CX()]);
+  const incoming = calls.filter((call) => call.direction === 'inbound');
+  const attached = calls.filter((call) => call.gestionnaire_id !== null && call.gestionnaire_id !== undefined).length;
+  const unansweredInbound = extensionMissed.size
+    ? [...extensionMissed.values()].reduce((total, count) => total + count, 0)
+    : incoming.filter((call) => call.statut === 'missed').length;
+  return {
+    totalAppels: calls.length,
+    dureeTotale: calls.reduce((total, call) => total + Number(call.duree || 0), 0),
+    tauxRattachement: calls.length ? (attached / calls.length) * 100 : 0,
+    appelsNonRattaches: calls.length - attached,
+    appelsSortants: calls.filter((call) => call.direction === 'outbound').length,
+    appelsEntrantsRepondues: incoming.filter((call) => call.statut === 'answered').length,
+    appelsEntrantsNonRepondues: unansweredInbound,
   };
+}
 
-  if (!process.env.DATABASE_URL) {
-    return fallbackOverview;
+async function get3CxManagerStats() {
+  const [managers, calls, extensionMissed] = await Promise.all([getGestionnaires(), fetchDirectionalCallsFrom3CX(), fetchExtensionMissedFrom3CX()]);
+  const stats = new Map();
+
+  for (const manager of managers) {
+    const id = Number(manager.id);
+    stats.set(String(id), {
+      id,
+      nom: manager.nom || '',
+      prenom: manager.prenom || '',
+      extension_3cx: manager.extension_3cx || null,
+      total_appels: 0,
+      total_sortants: 0,
+      entrants_repondues: 0,
+      entrants_non_repondues: 0,
+      duree_total_secondes: 0,
+      duree_moyenne_secondes: 0,
+    });
   }
 
-  try {
-    const { rows } = await query(`
-      SELECT
-        COUNT(*)::INT AS total_appels,
-        COUNT(*) FILTER (WHERE LOWER(direction::text) = 'sortant')::INT AS total_sortants,
-        COUNT(*) FILTER (WHERE LOWER(direction::text) = 'entrant' AND LOWER(COALESCE(statut, '')) IN ('answered', 'repondu', 'repondue', 'completed', 'answered_call'))::INT AS total_entrants_repondues,
-        COUNT(*) FILTER (WHERE LOWER(direction::text) = 'entrant' AND LOWER(COALESCE(statut, '')) NOT IN ('answered', 'repondu', 'repondue', 'completed', 'answered_call'))::INT AS total_entrants_non_repondues,
-        COALESCE(SUM(duree_secondes), 0)::INT AS duree_totale_secondes,
-        COALESCE(SUM(CASE WHEN communication_non_rattachee = TRUE THEN 1 ELSE 0 END), 0)::INT AS appels_non_rattaches
-      FROM appels_3cx
-    `);
-
-    if (rows && rows.length) {
-      const row = rows[0];
-      const totalAppels = Number(row.total_appels || 0);
-      const entrantsNonRepondues = Number(row.total_entrants_non_repondues || 0);
-      return {
-        totalAppels,
-        dureeTotale: Number(row.duree_totale_secondes || 0),
-        tauxRattachement: totalAppels ? Number(((totalAppels - Number(row.appels_non_rattaches || 0)) / totalAppels) * 100) : 0,
-        appelsNonRattaches: Number(row.appels_non_rattaches || 0),
-        appelsSortants: Number(row.total_sortants || 0),
-        appelsEntrantsRepondues: Number(row.total_entrants_repondues || 0),
-        appelsEntrantsNonRepondues: entrantsNonRepondues,
-      };
-    }
-
-    return fallbackOverview;
-  } catch (error) {
-    return fallbackOverview;
+  for (const call of calls) {
+    const manager = stats.get(String(call.gestionnaire_id));
+    if (!manager) continue;
+    manager.total_appels += 1;
+    manager.duree_total_secondes += Number(call.duree || 0);
+    if (call.direction === 'outbound') manager.total_sortants += 1;
+    if (call.direction === 'inbound' && call.statut === 'answered') manager.entrants_repondues += 1;
+    if (call.direction === 'inbound' && call.statut === 'missed') manager.entrants_non_repondues += 1;
   }
+
+  return [...stats.values()].map((manager) => ({
+    ...manager,
+    entrants_non_repondues: extensionMissed.get(normalizeExtension(manager.extension_3cx)) ?? manager.entrants_non_repondues,
+    duree_moyenne_secondes: manager.total_appels ? manager.duree_total_secondes / manager.total_appels : 0,
+  }));
 }
 
 module.exports = {
   fetchCallsFrom3CX,
   get3CxOverview,
+  get3CxManagerStats,
 };

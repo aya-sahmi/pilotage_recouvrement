@@ -610,11 +610,15 @@ function ImportsPage() {
 
 function ThreeCXPage() {
   const [kpi, setKpi] = useState(null);
+  const [kpiError, setKpiError] = useState('');
   const [calls, setCalls] = useState([]);
   const [managerStats, setManagerStats] = useState([]);
 
   useEffect(() => {
-    apiFetch('/3cx/kpi').then(setKpi).catch(() => setKpi(null));
+    apiFetch('/3cx/kpi').then(setKpi).catch((error) => {
+      setKpi(null);
+      setKpiError(error.message || 'Connexion 3CX impossible.');
+    });
     apiFetch('/3cx').then((payload) => setCalls(payload || [])).catch(() => setCalls([]));
     apiFetch('/3cx/gestionnaires')
       .then((payload) => setManagerStats(Array.isArray(payload) ? payload : []))
@@ -629,11 +633,12 @@ function ThreeCXPage() {
   return (
     <>
       <SectionTitle title="3CX" subtitle="Suivi des appels et rattachement" />
+      {kpiError && <div role="alert" className="mb-4 rounded-xl border border-rose-500/30 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">Données 3CX indisponibles : {kpiError}</div>}
       <div className="grid gap-4 md:grid-cols-4">
-        <StatCard label="Total appels" value={formatNumber(kpi?.totalAppels || 0)} accent="from-cyan-500 to-blue-600" icon={PhoneCall} subtitle="Tous appels" />
-        <StatCard label="Appels sortants" value={formatNumber(kpi?.appelsSortants || 0)} accent="from-green-500 to-emerald-600" icon={PhoneCall} subtitle="Sortants" />
-        <StatCard label="Entrants répondus" value={formatNumber(kpi?.appelsEntrantsRepondues || 0)} accent="from-violet-500 to-purple-600" icon={Gauge} subtitle="Entrants traités" />
-        <StatCard label="Entrants non répondus" value={formatNumber(kpi?.appelsEntrantsNonRepondues || 0)} accent={Number(kpi?.appelsEntrantsNonRepondues || 0) > 5 ? 'from-rose-500 to-red-600' : 'from-amber-500 to-orange-600'} icon={CircleDashed} subtitle="À surveiller" />
+        <StatCard label="Total appels" value={kpi ? formatNumber(kpi.totalAppels) : '—'} accent="from-cyan-500 to-blue-600" icon={PhoneCall} subtitle="Tous appels" />
+        <StatCard label="Appels sortants" value={kpi ? formatNumber(kpi.appelsSortants) : '—'} accent="from-green-500 to-emerald-600" icon={PhoneCall} subtitle="Sortants" />
+        <StatCard label="Entrants répondus" value={kpi ? formatNumber(kpi.appelsEntrantsRepondues) : '—'} accent="from-violet-500 to-purple-600" icon={Gauge} subtitle="Entrants traités" />
+        <StatCard label="Entrants non répondus" value={kpi ? formatNumber(kpi.appelsEntrantsNonRepondues) : '—'} accent={Number(kpi?.appelsEntrantsNonRepondues || 0) > 5 ? 'from-rose-500 to-red-600' : 'from-amber-500 to-orange-600'} icon={CircleDashed} subtitle="À surveiller" />
       </div>
 
       <div className="mt-6 rounded-3xl border border-white/10 bg-white/5 p-4">
