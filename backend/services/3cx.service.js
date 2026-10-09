@@ -143,8 +143,11 @@ function normalizeCall(row, index) {
     return null;
   }
 
+  const rawDirection = String(row.direction || row.type || row.call_direction || 'inbound').toLowerCase();
+  const rawStatus = String(row.statut || row.status || row.state || 'answered').toLowerCase();
   const callId = row.call_id || row.id || row.callId || row.uuid || 'cx-' + (index + 1);
-  const direction = row.direction || row.type || row.call_direction || 'inbound';
+  const direction = rawDirection.includes('sort') ? 'outbound' : rawDirection.includes('entr') || rawDirection.includes('inbound') ? 'inbound' : 'inbound';
+  const status = rawStatus.includes('miss') || rawStatus.includes('non') || rawStatus.includes('no_') || rawStatus.includes('busy') || rawStatus.includes('failed') ? 'missed' : rawStatus.includes('answer') || rawStatus.includes('repon') || rawStatus.includes('connect') ? 'answered' : 'answered';
   const startDate = row.date_debut || row.start_time || row.started_at || row.date || row.begin || new Date().toISOString();
 
   return {
@@ -157,7 +160,7 @@ function normalizeCall(row, index) {
     date_debut: startDate,
     date_fin: row.date_fin || row.end_time || row.ended_at || row.date_debut || startDate,
     duree: Number(row.duree || row.duration || row.call_duration || row.length || 0),
-    statut: row.statut || row.status || row.state || 'answered',
+    statut: status,
     gestionnaire_id: row.gestionnaire_id || row.agent_id || row.manager_id || null,
   };
 }
@@ -221,6 +224,9 @@ async function get3CxOverview() {
     dureeTotale: 0,
     tauxRattachement: 0,
     appelsNonRattaches: 0,
+    appelsSortants: 0,
+    appelsEntrantsRepondues: 0,
+    appelsEntrantsNonRepondues: 0,
   };
 
   if (!process.env.DATABASE_URL) {
@@ -231,6 +237,9 @@ async function get3CxOverview() {
     const { rows } = await query(`
       SELECT
         COUNT(*)::INT AS total_appels,
+        COUNT(*) FILTER (WHERE LOWER(direction::text) = 'sortant')::INT AS total_sortants,
+        COUNT(*) FILTER (WHERE LOWER(direction::text) = 'entrant' AND LOWER(COALESCE(statut, '')) IN ('answered', 'repondu', 'repondue', 'completed', 'answered_call'))::INT AS total_entrants_repondues,
+        COUNT(*) FILTER (WHERE LOWER(direction::text) = 'entrant' AND LOWER(COALESCE(statut, '')) NOT IN ('answered', 'repondu', 'repondue', 'completed', 'answered_call'))::INT AS total_entrants_non_repondues,
         COALESCE(SUM(duree_secondes), 0)::INT AS duree_totale_secondes,
         COALESCE(SUM(CASE WHEN communication_non_rattachee = TRUE THEN 1 ELSE 0 END), 0)::INT AS appels_non_rattaches
       FROM appels_3cx
@@ -238,11 +247,16 @@ async function get3CxOverview() {
 
     if (rows && rows.length) {
       const row = rows[0];
+      const totalAppels = Number(row.total_appels || 0);
+      const entrantsNonRepondues = Number(row.total_entrants_non_repondues || 0);
       return {
-        totalAppels: Number(row.total_appels || 0),
+        totalAppels,
         dureeTotale: Number(row.duree_totale_secondes || 0),
-        tauxRattachement: row.total_appels ? Number(((Number(row.total_appels) - Number(row.appels_non_rattaches)) / Number(row.total_appels)) * 100) : 0,
+        tauxRattachement: totalAppels ? Number(((totalAppels - Number(row.appels_non_rattaches || 0)) / totalAppels) * 100) : 0,
         appelsNonRattaches: Number(row.appels_non_rattaches || 0),
+        appelsSortants: Number(row.total_sortants || 0),
+        appelsEntrantsRepondues: Number(row.total_entrants_repondues || 0),
+        appelsEntrantsNonRepondues: entrantsNonRepondues,
       };
     }
 

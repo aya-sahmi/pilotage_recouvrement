@@ -621,17 +621,19 @@ function ThreeCXPage() {
       .catch(() => setManagerStats([]));
   }, []);
 
-  const rankedManagers = [...managerStats].sort((a, b) => (Number(b.total_appels || 0) - Number(a.total_appels || 0)) || (Number(b.duree_total_secondes || 0) - Number(a.duree_total_secondes || 0)));
-  const topThree = rankedManagers.slice(0, 3);
-  const bottomThree = rankedManagers.slice(-3).reverse();
+  const outgoingRanking = [...managerStats].sort((a, b) => (Number(b.total_sortants || 0) - Number(a.total_sortants || 0)) || (Number(b.total_appels || 0) - Number(a.total_appels || 0)));
+  const missedInboundRanking = [...managerStats].sort((a, b) => (Number(b.entrants_non_repondues || 0) - Number(a.entrants_non_repondues || 0)) || (Number(b.total_appels || 0) - Number(a.total_appels || 0))).slice(0, 4);
+  const topThree = outgoingRanking.slice(0, 3);
+  const bottomThree = missedInboundRanking;
 
   return (
     <>
       <SectionTitle title="3CX" subtitle="Suivi des appels et rattachement" />
-      <div className="grid gap-4 md:grid-cols-3">
-        <StatCard label="Total appels" value={formatNumber(kpi?.totalAppels || 0)} accent="from-cyan-500 to-blue-600" icon={PhoneCall} subtitle="Appels synchronisés" />
-        <StatCard label="Durée totale" value={formatDuration(kpi?.dureeTotale || 0)} accent="from-violet-500 to-purple-600" icon={Gauge} subtitle="Temps de conversation" />
-        <StatCard label="Appels non rattachés" value={formatNumber(kpi?.appelsNonRattaches || 0)} accent="from-rose-500 to-red-600" icon={CircleDashed} subtitle="À vérifier" />
+      <div className="grid gap-4 md:grid-cols-4">
+        <StatCard label="Total appels" value={formatNumber(kpi?.totalAppels || 0)} accent="from-cyan-500 to-blue-600" icon={PhoneCall} subtitle="Tous appels" />
+        <StatCard label="Appels sortants" value={formatNumber(kpi?.appelsSortants || 0)} accent="from-green-500 to-emerald-600" icon={PhoneCall} subtitle="Sortants" />
+        <StatCard label="Entrants répondus" value={formatNumber(kpi?.appelsEntrantsRepondues || 0)} accent="from-violet-500 to-purple-600" icon={Gauge} subtitle="Entrants traités" />
+        <StatCard label="Entrants non répondus" value={formatNumber(kpi?.appelsEntrantsNonRepondues || 0)} accent={Number(kpi?.appelsEntrantsNonRepondues || 0) > 5 ? 'from-rose-500 to-red-600' : 'from-amber-500 to-orange-600'} icon={CircleDashed} subtitle="À surveiller" />
       </div>
 
       <div className="mt-6 rounded-3xl border border-white/10 bg-white/5 p-4">
@@ -642,16 +644,15 @@ function ThreeCXPage() {
 
         <div className="mb-5 grid gap-3 lg:grid-cols-2">
           <div className="rounded-2xl border border-emerald-500/20 bg-emerald-500/5 p-4">
-            <div className="mb-3 text-xs uppercase tracking-[0.2em] text-emerald-300">Top 3</div>
+            <div className="mb-3 text-xs uppercase tracking-[0.2em] text-emerald-300">Top 3 sortants</div>
             <div className="space-y-2">
               {topThree.map((manager, index) => (
                 <div key={manager.id || manager.extension_3cx || `${manager.nom}-${index}`} className="flex items-center justify-between rounded-xl border border-white/10 bg-slate-900/40 px-3 py-2 text-sm text-slate-200">
                   <div>
                     <div className="font-semibold text-white">#{index + 1} {`${manager.prenom || ''} ${manager.nom || ''}`.trim() || 'Gestionnaire'}</div>
-                    <div className="text-slate-400">Ext. {manager.extension_3cx || '—'}</div>
                   </div>
                   <div className="text-right">
-                    <div className="font-bold text-emerald-300">{formatNumber(manager.total_appels || 0)} appels</div>
+                    <div className="font-bold text-emerald-300">{formatNumber(manager.total_sortants || 0)} sortants</div>
                     <div className="text-cyan-300">{formatDuration(manager.duree_total_secondes || 0)}</div>
                   </div>
                 </div>
@@ -660,16 +661,15 @@ function ThreeCXPage() {
           </div>
 
           <div className="rounded-2xl border border-rose-500/20 bg-rose-500/5 p-4">
-            <div className="mb-3 text-xs uppercase tracking-[0.2em] text-rose-300">Alertes / 3 derniers</div>
+            <div className="mb-3 text-xs uppercase tracking-[0.2em] text-rose-300">Top 4 entrants non répondus</div>
             <div className="space-y-2">
               {bottomThree.map((manager, index) => (
-                <div key={manager.id || manager.extension_3cx || `${manager.nom}-${index}`} className="flex items-center justify-between rounded-xl border border-white/10 bg-slate-900/40 px-3 py-2 text-sm text-slate-200">
+                <div key={manager.id || manager.extension_3cx || `${manager.nom}-${index}`} className="flex items-center justify-between rounded-xl border border-rose-500/20 bg-slate-900/40 px-3 py-2 text-sm text-rose-200">
                   <div>
-                    <div className="font-semibold text-white">{`${manager.prenom || ''} ${manager.nom || ''}`.trim() || 'Gestionnaire'}</div>
-                    <div className="text-slate-400">Ext. {manager.extension_3cx || '—'}</div>
+                    <div className="font-semibold text-white">#{index + 1} {`${manager.prenom || ''} ${manager.nom || ''}`.trim() || 'Gestionnaire'}</div>
                   </div>
                   <div className="text-right">
-                    <div className="font-bold text-rose-300">{formatNumber(manager.total_appels || 0)} appels</div>
+                    <div className="font-bold text-rose-300">{formatNumber(manager.entrants_non_repondues || 0)} non répondu</div>
                     <div className="text-cyan-300">{formatDuration(manager.duree_total_secondes || 0)}</div>
                   </div>
                 </div>
@@ -679,22 +679,23 @@ function ThreeCXPage() {
         </div>
 
         <div className="overflow-hidden rounded-2xl border border-white/10 bg-slate-900/40">
-          <div className="grid grid-cols-[1.5fr_0.7fr_0.8fr_0.9fr_0.9fr] gap-3 border-b border-white/10 px-4 py-3 text-[10px] uppercase tracking-[0.2em] text-slate-400">
+          <div className="grid grid-cols-[1.8fr_1fr_1fr_1.2fr] gap-3 border-b border-white/10 px-4 py-3 text-[10px] uppercase tracking-[0.2em] text-slate-400">
             <span>Gestionnaire</span>
-            <span>Extension</span>
-            <span>Appels</span>
-            <span>Durée</span>
-            <span>Moyenne</span>
+            <span>Sortants</span>
+            <span>Entrants non rép.</span>
+            <span>Durée totale</span>
           </div>
-          {(rankedManagers || []).map((manager, index) => (
-            <div key={manager.id || manager.extension_3cx || `${manager.nom}-${index}`} className="grid grid-cols-[1.5fr_0.7fr_0.8fr_0.9fr_0.9fr] items-center gap-3 border-b border-white/10 px-4 py-3 text-sm text-slate-200 last:border-b-0">
-              <span className="font-semibold text-white">{`${manager.prenom || ''} ${manager.nom || ''}`.trim() || 'Gestionnaire'}</span>
-              <span>{manager.extension_3cx || '—'}</span>
-              <span>{formatNumber(manager.total_appels || 0)}</span>
-              <span>{formatDuration(manager.duree_total_secondes || 0)}</span>
-              <span>{formatDuration(manager.duree_moyenne_secondes || 0)}</span>
-            </div>
-          ))}
+          {(outgoingRanking || []).map((manager, index) => {
+            const isRedAlert = Number(manager.entrants_non_repondues || 0) >= 1;
+            return (
+              <div key={manager.id || manager.extension_3cx || `${manager.nom}-${index}`} className={`grid grid-cols-[1.8fr_1fr_1fr_1.2fr] items-center gap-3 border-b border-white/10 px-4 py-3 text-sm ${isRedAlert ? 'bg-rose-500/10 text-rose-200' : 'text-slate-200'} last:border-b-0`}>
+                <span className="font-semibold text-white">{`${manager.prenom || ''} ${manager.nom || ''}`.trim() || 'Gestionnaire'}</span>
+                <span>{formatNumber(manager.total_sortants || 0)}</span>
+                <span className={isRedAlert ? 'font-bold text-rose-300' : 'text-slate-200'}>{formatNumber(manager.entrants_non_repondues || 0)}</span>
+                <span>{formatDuration(manager.duree_total_secondes || 0)}</span>
+              </div>
+            );
+          })}
         </div>
       </div>
 
@@ -1051,6 +1052,116 @@ function TVPortfolioSlide() {
   );
 }
 
+function TVCallsPodiumSlide() {
+  const [managerStats, setManagerStats] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let mounted = true;
+    apiFetch('/3cx/gestionnaires')
+      .then((payload) => mounted && setManagerStats(Array.isArray(payload) ? payload : []))
+      .catch(() => mounted && setManagerStats([]))
+      .finally(() => mounted && setLoading(false));
+
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  if (loading) return <div className="py-24 text-center text-xl text-slate-300">Chargement du classement 3CX…</div>;
+
+  const topThree = [...managerStats]
+    .sort((a, b) => (Number(b.total_sortants || 0) - Number(a.total_sortants || 0)) || (Number(b.total_appels || 0) - Number(a.total_appels || 0)))
+    .slice(0, 3);
+  const missedInboundTopFour = [...managerStats]
+    .sort((a, b) => (Number(b.entrants_non_repondues || 0) - Number(a.entrants_non_repondues || 0)) || (Number(b.total_appels || 0) - Number(a.total_appels || 0)))
+    .slice(0, 4);
+
+  if (!managerStats.length) {
+    return <EmptyState title="Classement 3CX indisponible" description="Aucune donnée de gestionnaire n’est disponible pour le classement TV." />;
+  }
+
+  const podiumOrder = [topThree[1], topThree[0], topThree[2]].filter(Boolean);
+  const podiumHeights = {
+    1: 'min-h-[42vh]',
+    2: 'min-h-[34vh]',
+    3: 'min-h-[30vh]',
+  };
+
+  return (
+    <section className="flex min-h-[calc(100vh-10rem)] flex-col justify-center py-4">
+      <TVSlideHeading eyebrow="Classement 3CX" title="Appels par gestionnaire" subtitle="Podium des sortants et alertes des entrants non répondus" />
+      <div className="mx-auto grid w-full max-w-[1500px] items-center gap-6 xl:grid-cols-[1.7fr_1fr]">
+        <div className="grid grid-cols-1 items-end gap-4 sm:grid-cols-3 sm:gap-5">
+        {podiumOrder.map((row, index) => {
+          const rank = [2, 1, 3][index] || index + 1;
+          const isFirst = rank === 1;
+          const managerName = `${row.prenom || ''} ${row.nom || ''}`.trim() || 'Gestionnaire';
+
+          return (
+            <motion.div
+              key={row.id || row.extension_3cx || managerName}
+              initial={{ opacity: 0, y: 70, scale: 0.94 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              transition={{ duration: 0.65, delay: index * 0.16, ease: 'easeOut' }}
+              className={`relative flex ${podiumHeights[rank] || 'min-h-[30vh]'} flex-col items-center justify-center overflow-hidden rounded-[2rem] border p-4 text-center shadow-2xl ${
+                isFirst
+                  ? 'border-amber-300/60 bg-gradient-to-b from-amber-300/25 via-amber-500/10 to-slate-900/80 shadow-amber-500/10 sm:-translate-y-8'
+                  : rank === 2
+                    ? 'border-slate-300/30 bg-gradient-to-b from-slate-300/15 to-slate-900/80'
+                    : 'border-orange-300/30 bg-gradient-to-b from-orange-500/15 to-slate-900/80'
+              }`}
+            >
+              <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/50 to-transparent" />
+              <div className={`mb-3 flex h-11 w-11 items-center justify-center rounded-full text-xl font-black ${isFirst ? 'bg-amber-300 text-slate-950' : 'bg-white/10 text-white'}`}>
+                {rank}
+              </div>
+              <TVAvatar name={managerName} className={isFirst ? 'h-20 w-20 text-2xl' : 'h-16 w-16 text-xl'} />
+              <h2 className={`mt-3 font-black text-white ${isFirst ? 'text-xl md:text-2xl' : 'text-lg md:text-xl'}`}>{managerName}</h2>
+              <p className={`mt-2 font-black ${isFirst ? 'text-3xl text-amber-200' : 'text-2xl text-cyan-200'}`}>{formatNumber(row.total_sortants || 0)}</p>
+              <p className="mt-1 text-xs uppercase tracking-[0.2em] text-slate-400">Appels sortants</p>
+            </motion.div>
+          );
+        })}
+        </div>
+
+        <div className="rounded-3xl border border-rose-500/30 bg-rose-950/30 p-5 shadow-xl shadow-rose-950/20">
+          <div className="mb-4 flex items-center justify-between gap-3 border-b border-rose-300/15 pb-3">
+            <div>
+              <p className="text-xs font-bold uppercase tracking-[0.3em] text-rose-300">À surveiller</p>
+              <h2 className="mt-1 text-xl font-black text-white md:text-2xl">Top 4 entrants non répondus</h2>
+            </div>
+            <span className="rounded-full bg-rose-400/15 px-3 py-1 text-sm font-black text-rose-200">4 max.</span>
+          </div>
+          <div className="space-y-3">
+            {missedInboundTopFour.map((row, index) => {
+              const managerName = `${row.prenom || ''} ${row.nom || ''}`.trim() || 'Gestionnaire';
+              return (
+                <motion.div
+                  key={row.id || row.extension_3cx || managerName}
+                  initial={{ opacity: 0, x: 24 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  transition={{ duration: 0.45, delay: index * 0.1 }}
+                  className="flex items-center justify-between gap-3 rounded-2xl border border-rose-400/25 bg-rose-500/10 px-4 py-3"
+                >
+                  <div className="flex min-w-0 items-center gap-3">
+                    <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-rose-400/20 text-sm font-black text-rose-200">#{index + 1}</span>
+                    <span className="truncate text-base font-bold text-white md:text-lg">{managerName}</span>
+                  </div>
+                  <span className="shrink-0 text-xl font-black text-rose-300 md:text-2xl">
+                    {formatNumber(row.entrants_non_repondues || 0)}
+                    <span className="ml-2 text-xs font-bold uppercase text-rose-200/70">manqués</span>
+                  </span>
+                </motion.div>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
 function TVSlideContent({ screenId }) {
   switch (screenId) {
     case 'dashboard':
@@ -1066,7 +1177,7 @@ function TVSlideContent({ screenId }) {
     case 'portfolio':
       return <TVPortfolioSlide />;
     case 'calls':
-      return <ThreeCXPage />;
+      return <TVCallsPodiumSlide />;
     default:
       return null;
   }

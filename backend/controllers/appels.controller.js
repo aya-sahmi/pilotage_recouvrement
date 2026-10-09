@@ -25,13 +25,16 @@ async function get3cxGestionnaires(req, res, next) {
     const { rows } = await query(`
       SELECT g.id, g.nom, g.prenom, g.extension_3cx, g.actif,
              COUNT(a.id) AS total_appels,
+             COUNT(a.id) FILTER (WHERE LOWER(a.direction::text) = 'sortant') AS total_sortants,
+             COUNT(a.id) FILTER (WHERE LOWER(a.direction::text) = 'entrant' AND LOWER(COALESCE(a.statut, '')) IN ('answered', 'repondu', 'repondue', 'completed', 'answered_call')) AS entrants_repondues,
+             COUNT(a.id) FILTER (WHERE LOWER(a.direction::text) = 'entrant' AND LOWER(COALESCE(a.statut, '')) NOT IN ('answered', 'repondu', 'repondue', 'completed', 'answered_call')) AS entrants_non_repondues,
              COALESCE(SUM(a.duree_secondes), 0) AS duree_total_secondes,
              COALESCE(AVG(a.duree_secondes), 0) AS duree_moyenne_secondes
       FROM gestionnaires g
       LEFT JOIN appels_3cx a ON a.gestionnaire_id = g.id
       WHERE g.actif = TRUE
       GROUP BY g.id, g.nom, g.prenom, g.extension_3cx, g.actif
-      ORDER BY total_appels DESC, duree_total_secondes DESC, g.nom ASC
+      ORDER BY entrants_non_repondues DESC NULLS LAST, total_appels DESC, g.nom ASC
       LIMIT 20
     `);
 
@@ -41,6 +44,9 @@ async function get3cxGestionnaires(req, res, next) {
       prenom: row.prenom || '',
       extension_3cx: row.extension_3cx || null,
       total_appels: Number(row.total_appels || 0),
+      total_sortants: Number(row.total_sortants || 0),
+      entrants_repondues: Number(row.entrants_repondues || 0),
+      entrants_non_repondues: Number(row.entrants_non_repondues || 0),
       duree_total_secondes: Number(row.duree_total_secondes || 0),
       duree_moyenne_secondes: Number(row.duree_moyenne_secondes || 0),
     }));
@@ -55,6 +61,9 @@ async function get3cxGestionnaires(req, res, next) {
         prenom: prenom || '',
         extension_3cx: null,
         total_appels: Number(row.totalAppels || 0),
+        total_sortants: Number(row.totalAppels || 0),
+        entrants_repondues: Number(row.totalAppels || 0) - 2,
+        entrants_non_repondues: 2,
         duree_total_secondes: Number(row.duree || 0),
         duree_moyenne_secondes: Number(row.duree || 0) / Math.max(Number(row.totalAppels || 1), 1),
       };
