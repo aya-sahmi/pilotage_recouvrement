@@ -254,6 +254,7 @@ async function fetchReportRows(reportName, functionName, parameters, token) {
     if (!response.ok) {
       const error = new Error(`Le rapport 3CX ${reportName} a répondu ${response.status}.`);
       error.statusCode = response.status;
+      error.reportName = reportName;
       throw error;
     }
 
@@ -309,10 +310,22 @@ async function fetchDirectionalCallsFrom3CX() {
 
   const token = await getAccessToken();
   const { from, to } = getReportPeriod();
-  const [inbound, outbound] = await Promise.all([
-    fetchReportRows('ReportInboundCalls', 'Pbx.GetInboundCalls', `periodFrom=${from},periodTo=${to},trunkDns='',callsType=0`, token),
-    fetchReportRows('ReportOutboundCalls', 'Pbx.GetOutboundCalls', `periodFrom=${from},periodTo=${to},trunkDns='',callsType=0`, token),
-  ]);
+  let inbound;
+  let outbound;
+  try {
+    [inbound, outbound] = await Promise.all([
+      fetchReportRows('ReportInboundCalls', 'Pbx.GetInboundCalls', `periodFrom=${from},periodTo=${to},trunkDns='',callsType=0`, token),
+      fetchReportRows('ReportOutboundCalls', 'Pbx.GetOutboundCalls', `periodFrom=${from},periodTo=${to},trunkDns='',callsType=0`, token),
+    ]);
+  } catch (error) {
+    if (error.statusCode !== 401) throw error;
+
+    console.warn(`3CX ${error.reportName || 'directional call report'} returned 401; falling back to ReportCallLogData.`);
+    cachedDirectionalCalls = await fetchCallsFrom3CX();
+    cachedDirectionalCallsAt = Date.now();
+    return cachedDirectionalCalls;
+  }
+
   const managers = await getGestionnairesByExtension();
   cachedDirectionalCalls = [...inbound.map((row, index) => normalizeCall(row, index, 'Inbound')), ...outbound.map((row, index) => normalizeCall(row, inbound.length + index, 'Outbound'))]
     .filter(Boolean)

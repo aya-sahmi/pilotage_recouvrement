@@ -44,6 +44,7 @@ test('3CX XAPI report rows are normalized and used for KPIs and manager rankings
   process.env.THREECX_CLIENT_ID = 'test-client';
   process.env.THREECX_CLIENT_SECRET = 'test-secret';
   delete process.env.THREECX_API_KEY;
+  let denyInboundReport = false;
   global.fetch = async (url) => {
     const requestUrl = String(url);
     requestedUrls.push(requestUrl);
@@ -76,6 +77,10 @@ test('3CX XAPI report rows are normalized and used for KPIs and manager rankings
     }
 
     const inbound = requestUrl.includes('ReportInboundCalls');
+    if (inbound && denyInboundReport) {
+      return { ok: false, status: 401, json: async () => ({}) };
+    }
+
     return {
       ok: true,
       status: 200,
@@ -95,12 +100,14 @@ test('3CX XAPI report rows are normalized and used for KPIs and manager rankings
     assert.equal(calls.find((call) => call.call_id === 'out-1').duree, 125.5);
     assert.ok(requestedUrls.some((url) => url.includes('ReportCallLogData/Pbx.GetCallLogData')));
 
+    denyInboundReport = true;
     const overview = await get3CxOverview();
     assert.equal(overview.totalAppels, 2);
     assert.equal(overview.appelsSortants, 1);
     assert.equal(overview.appelsEntrantsNonRepondues, 1);
     assert.ok(requestedUrls.some((url) => url.includes('ReportInboundCalls/Pbx.GetInboundCalls')));
     assert.ok(requestedUrls.some((url) => url.includes('ReportOutboundCalls/Pbx.GetOutboundCalls')));
+    assert.ok(requestedUrls.some((url) => url.includes('ReportCallLogData/Pbx.GetCallLogData')));
     assert.ok(requestedUrls.some((url) => url.includes('ReportExtensionStatisticsByGroup/Pbx.GetExtensionStatisticsByGroupData')));
 
     const managerStats = await get3CxManagerStats();
