@@ -24,6 +24,33 @@ test('fetchCallsFrom3CX does not return mock calls in production without 3CX con
   delete process.env.NODE_ENV;
 });
 
+test('fetchCallsFrom3CX does not use the one-time 3CX API key as a bearer token', async () => {
+  const envKeys = ['THREECX_API_URL', 'THREECX_CLIENT_ID', 'THREECX_CLIENT_SECRET', 'THREECX_API_KEY'];
+  const originalEnv = Object.fromEntries(envKeys.map((key) => [key, process.env[key]]));
+  const originalFetch = global.fetch;
+  let fetchCalled = false;
+
+  process.env.THREECX_API_URL = 'https://pbx.example:5001';
+  delete process.env.THREECX_CLIENT_ID;
+  delete process.env.THREECX_CLIENT_SECRET;
+  process.env.THREECX_API_KEY = 'one-time-api-key';
+  global.fetch = async () => {
+    fetchCalled = true;
+    throw new Error('fetch should not be called');
+  };
+
+  try {
+    await assert.rejects(fetchCallsFrom3CX(), /Configurez THREECX_CLIENT_ID et THREECX_CLIENT_SECRET/);
+    assert.equal(fetchCalled, false);
+  } finally {
+    global.fetch = originalFetch;
+    for (const key of envKeys) {
+      if (originalEnv[key] === undefined) delete process.env[key];
+      else process.env[key] = originalEnv[key];
+    }
+  }
+});
+
 test('get3CxOverview falls back to mock KPI when database is not configured', async () => {
   delete process.env.DATABASE_URL;
 

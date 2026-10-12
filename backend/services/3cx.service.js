@@ -55,10 +55,6 @@ async function getAccessToken() {
     return cachedToken;
   }
 
-  if (process.env.THREECX_API_KEY) {
-    return process.env.THREECX_API_KEY;
-  }
-
   throw new Error('Configurez THREECX_CLIENT_ID et THREECX_CLIENT_SECRET pour accéder aux rapports 3CX.');
 }
 
