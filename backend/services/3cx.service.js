@@ -33,7 +33,6 @@ async function getAccessToken() {
       grant_type: 'client_credentials',
       client_id: process.env.THREECX_CLIENT_ID,
       client_secret: process.env.THREECX_CLIENT_SECRET,
-      scope: 'pbxConfigApi',
     });
     const response = await fetch(`${getApiBaseUrl()}/connect/token`, {
       method: 'POST',

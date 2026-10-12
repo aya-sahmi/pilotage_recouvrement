@@ -66,16 +66,18 @@ test('3CX XAPI report rows are normalized and used for KPIs and manager rankings
   const envKeys = ['THREECX_API_URL', 'THREECX_CLIENT_ID', 'THREECX_CLIENT_SECRET', 'THREECX_API_KEY', 'THREECX_GROUP_NUMBER'];
   const originalEnv = Object.fromEntries(envKeys.map((key) => [key, process.env[key]]));
   const requestedUrls = [];
+  const tokenRequestBodies = [];
 
   process.env.THREECX_API_URL = 'https://pbx.example:5001';
   process.env.THREECX_CLIENT_ID = 'test-client';
   process.env.THREECX_CLIENT_SECRET = 'test-secret';
   delete process.env.THREECX_API_KEY;
   let denyInboundReport = false;
-  global.fetch = async (url) => {
+  global.fetch = async (url, options = {}) => {
     const requestUrl = String(url);
     requestedUrls.push(requestUrl);
     if (requestUrl.endsWith('/connect/token')) {
+      tokenRequestBodies.push(new URLSearchParams(options.body));
       return { ok: true, status: 200, json: async () => ({ access_token: 'test-token', expires_in: 300 }) };
     }
 
@@ -122,6 +124,11 @@ test('3CX XAPI report rows are normalized and used for KPIs and manager rankings
   try {
     const calls = await fetchCallsFrom3CX();
     assert.equal(calls.length, 2);
+    assert.deepEqual(Object.fromEntries(tokenRequestBodies[0]), {
+      grant_type: 'client_credentials',
+      client_id: 'test-client',
+      client_secret: 'test-secret',
+    });
     assert.equal(calls.find((call) => call.call_id === 'in-1').direction, 'inbound');
     assert.equal(calls.find((call) => call.call_id === 'in-1').statut, 'missed');
     assert.equal(calls.find((call) => call.call_id === 'out-1').duree, 125.5);
