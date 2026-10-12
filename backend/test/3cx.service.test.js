@@ -98,6 +98,9 @@ test('3CX XAPI report rows are normalized and used for KPIs and manager rankings
       if (requestUrl.includes("groupNumber='DENIED'")) {
         return { ok: false, status: 401, json: async () => ({}) };
       }
+      if (requestUrl.includes("groupNumber='FORBIDDEN'")) {
+        return { ok: false, status: 403, json: async () => ({}) };
+      }
       return {
         ok: true,
         status: 200,
@@ -151,6 +154,10 @@ test('3CX XAPI report rows are normalized and used for KPIs and manager rankings
     process.env.THREECX_GROUP_NUMBER = 'DENIED';
     const overviewWithoutExtensionReport = await get3CxOverview();
     assert.equal(overviewWithoutExtensionReport.appelsEntrantsNonRepondues, 1);
+
+    process.env.THREECX_GROUP_NUMBER = 'FORBIDDEN';
+    const overviewWithoutExtensionPermission = await get3CxOverview();
+    assert.equal(overviewWithoutExtensionPermission.appelsEntrantsNonRepondues, 1);
   } finally {
     global.fetch = originalFetch;
     for (const key of envKeys) {

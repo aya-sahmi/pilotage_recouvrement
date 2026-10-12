@@ -313,9 +313,9 @@ async function fetchDirectionalCallsFrom3CX() {
       fetchReportRows('ReportOutboundCalls', 'Pbx.GetOutboundCalls', `periodFrom=${from},periodTo=${to},trunkDns='',callsType=0`, token),
     ]);
   } catch (error) {
-    if (error.statusCode !== 401) throw error;
+    if (error.statusCode !== 401 && error.statusCode !== 403) throw error;
 
-    console.warn(`3CX ${error.reportName || 'directional call report'} returned 401; falling back to ReportCallLogData.`);
+    console.warn(`3CX ${error.reportName || 'directional call report'} returned ${error.statusCode}; falling back to ReportCallLogData.`);
     cachedDirectionalCalls = await fetchCallsFrom3CX();
     cachedDirectionalCallsAt = Date.now();
     return cachedDirectionalCalls;
@@ -346,8 +346,8 @@ async function fetchExtensionMissedFrom3CX() {
       token,
     );
   } catch (error) {
-    if (error.statusCode !== 401) throw error;
-    console.warn('3CX extension statistics returned 401; using unanswered counts from the inbound report.');
+    if (error.statusCode !== 401 && error.statusCode !== 403) throw error;
+    console.warn(`3CX extension statistics returned ${error.statusCode}; using unanswered counts from the inbound report.`);
     cachedExtensionMissed = new Map();
     cachedExtensionMissedAt = Date.now();
     cachedExtensionMissedKey = cacheKey;
