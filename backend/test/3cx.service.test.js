@@ -72,6 +72,7 @@ test('3CX XAPI report rows are normalized and used for KPIs and manager rankings
   process.env.THREECX_CLIENT_ID = 'test-client';
   process.env.THREECX_CLIENT_SECRET = 'test-secret';
   delete process.env.THREECX_API_KEY;
+  let denyCallLog = true;
   let denyInboundReport = false;
   global.fetch = async (url, options = {}) => {
     const requestUrl = String(url);
@@ -82,6 +83,9 @@ test('3CX XAPI report rows are normalized and used for KPIs and manager rankings
     }
 
     if (requestUrl.includes('ReportCallLogData')) {
+      if (denyCallLog) {
+        return { ok: false, status: 401, json: async () => ({}) };
+      }
       return {
         ok: true,
         status: 200,
@@ -125,8 +129,9 @@ test('3CX XAPI report rows are normalized and used for KPIs and manager rankings
   };
 
   try {
-    const calls = await fetchCallsFrom3CX();
+    const [calls] = await Promise.all([fetchCallsFrom3CX(), fetchCallsFrom3CX()]);
     assert.equal(calls.length, 2);
+    assert.equal(tokenRequestBodies.length, 1, 'concurrent requests should share one OAuth token request');
     assert.deepEqual(Object.fromEntries(tokenRequestBodies[0]), {
       grant_type: 'client_credentials',
       client_id: 'test-client',
@@ -135,8 +140,11 @@ test('3CX XAPI report rows are normalized and used for KPIs and manager rankings
     assert.equal(calls.find((call) => call.call_id === 'in-1').direction, 'inbound');
     assert.equal(calls.find((call) => call.call_id === 'in-1').statut, 'missed');
     assert.equal(calls.find((call) => call.call_id === 'out-1').duree, 125.5);
-    assert.ok(requestedUrls.some((url) => url.includes('ReportCallLogData/Pbx.GetCallLogData')));
+    assert.ok(requestedUrls.some((url) => url.includes('ReportInboundCalls/Pbx.GetInboundCalls')));
+    assert.ok(requestedUrls.some((url) => url.includes('ReportOutboundCalls/Pbx.GetOutboundCalls')));
+    assert.ok(requestedUrls.some((url) => new URL(url).searchParams.get('$top') === '1000'));
 
+    denyCallLog = false;
     denyInboundReport = true;
     const overview = await get3CxOverview();
     assert.equal(overview.totalAppels, 2);

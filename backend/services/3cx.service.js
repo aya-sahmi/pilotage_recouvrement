@@ -11,6 +11,7 @@ function normalizeExtension(value) {
 
 let cachedToken = null;
 let cachedTokenExpiresAt = 0;
+let pendingTokenRequest = null;
 let cachedCalls = null;
 let cachedCallsAt = 0;
 let cachedDirectionalCalls = null;
@@ -24,11 +25,18 @@ function getApiBaseUrl() {
 }
 
 async function getAccessToken() {
-  if (process.env.THREECX_CLIENT_ID && process.env.THREECX_CLIENT_SECRET) {
-    if (cachedToken && Date.now() < cachedTokenExpiresAt - 30000) {
-      return cachedToken;
-    }
+  if (!process.env.THREECX_CLIENT_ID || !process.env.THREECX_CLIENT_SECRET) {
+    throw new Error('Configurez THREECX_CLIENT_ID et THREECX_CLIENT_SECRET pour accéder aux rapports 3CX.');
+  }
 
+  if (cachedToken && Date.now() < cachedTokenExpiresAt - 30000) {
+    return cachedToken;
+  }
+  if (pendingTokenRequest) {
+    return pendingTokenRequest;
+  }
+
+  pendingTokenRequest = (async () => {
     const body = new URLSearchParams({
       grant_type: 'client_credentials',
       client_id: process.env.THREECX_CLIENT_ID,
@@ -52,9 +60,13 @@ async function getAccessToken() {
     cachedToken = payload.access_token;
     cachedTokenExpiresAt = Date.now() + Number(payload.expires_in || 300) * 1000;
     return cachedToken;
-  }
+  })();
 
-  throw new Error('Configurez THREECX_CLIENT_ID et THREECX_CLIENT_SECRET pour accéder aux rapports 3CX.');
+  try {
+    return await pendingTokenRequest;
+  } finally {
+    pendingTokenRequest = null;
+  }
 }
 
 async function getGestionnairesByExtension() {
@@ -237,7 +249,7 @@ function normalizeCall(row, index, directionOverride) {
 }
 
 async function fetchReportRows(reportName, functionName, parameters, token) {
-  const pageSize = 100;
+  const pageSize = 1000;
   const allRows = [];
 
   for (let skip = 0; skip < 20000; skip += pageSize) {
@@ -259,6 +271,30 @@ async function fetchReportRows(reportName, functionName, parameters, token) {
   }
 
   return allRows;
+}
+
+async function fetchCallLogRows(token) {
+  const { from, to } = getReportPeriod();
+  return fetchReportRows(
+    'ReportCallLogData',
+    'Pbx.GetCallLogData',
+    `periodFrom=${from},periodTo=${to},sourceType=0,sourceFilter='',destinationType=0,destinationFilter='',callsType=0,callTimeFilterType=0,callTimeFilterFrom='0:00:0',callTimeFilterTo='0:00:0',hidePcalls=true`,
+    token,
+  );
+}
+
+async function fetchDirectionalRows(token) {
+  const { from, to } = getReportPeriod();
+  return Promise.all([
+    fetchReportRows('ReportInboundCalls', 'Pbx.GetInboundCalls', `periodFrom=${from},periodTo=${to},trunkDns='',callsType=0`, token),
+    fetchReportRows('ReportOutboundCalls', 'Pbx.GetOutboundCalls', `periodFrom=${from},periodTo=${to},trunkDns='',callsType=0`, token),
+  ]);
+}
+
+function normalizeDirectionalCalls(inbound, outbound, managers) {
+  return [...inbound.map((row, index) => normalizeCall(row, index, 'Inbound')), ...outbound.map((row, index) => normalizeCall(row, inbound.length + index, 'Outbound'))]
+    .filter(Boolean)
+    .map((call) => attachManagerToCall(call, managers));
 }
 
 function getReportPeriod() {
@@ -285,16 +321,21 @@ async function fetchCallsFrom3CX() {
   }
 
   const token = await getAccessToken();
-  const { from, to } = getReportPeriod();
-  const journalRows = await fetchReportRows(
-    'ReportCallLogData',
-    'Pbx.GetCallLogData',
-    `periodFrom=${from},periodTo=${to},sourceType=0,sourceFilter='',destinationType=0,destinationFilter='',callsType=0,callTimeFilterType=0,callTimeFilterFrom='0:00:0',callTimeFilterTo='0:00:0',hidePcalls=true`,
-    token,
-  );
-  const managers = await getGestionnairesByExtension();
-  cachedCalls = journalRows.map((row, index) => normalizeCall(row, index)).filter(Boolean)
-    .map((call) => attachManagerToCall(call, managers));
+  let calls;
+  try {
+    const journalRows = await fetchCallLogRows(token);
+    const managers = await getGestionnairesByExtension();
+    calls = journalRows.map((row, index) => normalizeCall(row, index)).filter(Boolean)
+      .map((call) => attachManagerToCall(call, managers));
+  } catch (error) {
+    if (error.statusCode !== 401 && error.statusCode !== 403) throw error;
+
+    console.warn(`3CX ${error.reportName || 'call log report'} returned ${error.statusCode}; trying inbound and outbound call reports.`);
+    const [inbound, outbound] = await fetchDirectionalRows(token);
+    const managers = await getGestionnairesByExtension();
+    calls = normalizeDirectionalCalls(inbound, outbound, managers);
+  }
+  cachedCalls = calls;
   cachedCallsAt = Date.now();
   return cachedCalls;
 }
@@ -304,27 +345,24 @@ async function fetchDirectionalCallsFrom3CX() {
   if (cachedDirectionalCalls && Date.now() - cachedDirectionalCallsAt < 15000) return cachedDirectionalCalls;
 
   const token = await getAccessToken();
-  const { from, to } = getReportPeriod();
   let inbound;
   let outbound;
   try {
-    [inbound, outbound] = await Promise.all([
-      fetchReportRows('ReportInboundCalls', 'Pbx.GetInboundCalls', `periodFrom=${from},periodTo=${to},trunkDns='',callsType=0`, token),
-      fetchReportRows('ReportOutboundCalls', 'Pbx.GetOutboundCalls', `periodFrom=${from},periodTo=${to},trunkDns='',callsType=0`, token),
-    ]);
+    [inbound, outbound] = await fetchDirectionalRows(token);
   } catch (error) {
     if (error.statusCode !== 401 && error.statusCode !== 403) throw error;
 
     console.warn(`3CX ${error.reportName || 'directional call report'} returned ${error.statusCode}; falling back to ReportCallLogData.`);
-    cachedDirectionalCalls = await fetchCallsFrom3CX();
+    const journalRows = await fetchCallLogRows(token);
+    const managers = await getGestionnairesByExtension();
+    cachedDirectionalCalls = journalRows.map((row, index) => normalizeCall(row, index)).filter(Boolean)
+      .map((call) => attachManagerToCall(call, managers));
     cachedDirectionalCallsAt = Date.now();
     return cachedDirectionalCalls;
   }
 
   const managers = await getGestionnairesByExtension();
-  cachedDirectionalCalls = [...inbound.map((row, index) => normalizeCall(row, index, 'Inbound')), ...outbound.map((row, index) => normalizeCall(row, inbound.length + index, 'Outbound'))]
-    .filter(Boolean)
-    .map((call) => attachManagerToCall(call, managers));
+  cachedDirectionalCalls = normalizeDirectionalCalls(inbound, outbound, managers);
   cachedDirectionalCallsAt = Date.now();
   return cachedDirectionalCalls;
 }
