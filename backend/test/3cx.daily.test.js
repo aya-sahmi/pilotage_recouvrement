@@ -92,6 +92,83 @@ test('daily stats fall back to directional reports with the selected date when c
   }
 });
 
+test('daily stats use per-extension totals when all call-detail reports are denied', async () => {
+  const originalFetch = global.fetch;
+  const envKeys = ['DATABASE_URL', 'THREECX_API_URL', 'THREECX_CLIENT_ID', 'THREECX_CLIENT_SECRET', 'THREECX_GROUP_NUMBER', 'NODE_ENV'];
+  const originalEnv = Object.fromEntries(envKeys.map((key) => [key, process.env[key]]));
+  const requestedUrls = [];
+  process.env.THREECX_API_URL = 'https://pbx.example:5001';
+  process.env.THREECX_CLIENT_ID = 'test-client';
+  process.env.THREECX_CLIENT_SECRET = 'test-secret';
+  process.env.THREECX_GROUP_NUMBER = 'GRP2';
+  delete process.env.DATABASE_URL;
+  delete process.env.NODE_ENV;
+
+  global.fetch = async (url) => {
+    const requestUrl = String(url);
+    requestedUrls.push(requestUrl);
+    if (requestUrl.endsWith('/connect/token')) {
+      return { ok: true, status: 200, json: async () => ({ access_token: 'test-token', expires_in: 300 }) };
+    }
+    if (requestUrl.includes('ReportExtensionStatisticsByGroup')) {
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          value: [
+            {
+              Dn: '101',
+              InboundAnsweredCount: 4,
+              InboundAnsweredTalkingDur: 'PT8M',
+              InboundUnansweredCount: 2,
+              OutboundAnsweredCount: 3,
+              OutboundAnsweredTalkingDur: 'PT6M',
+              OutboundUnansweredCount: 1,
+            },
+            {
+              Dn: '103',
+              InboundAnsweredCount: 1,
+              InboundAnsweredTalkingDur: 'PT2M',
+              InboundUnansweredCount: 0,
+              OutboundAnsweredCount: 5,
+              OutboundAnsweredTalkingDur: 'PT15M',
+              OutboundUnansweredCount: 2,
+            },
+          ],
+        }),
+      };
+    }
+    return { ok: false, status: 401, json: async () => ({}) };
+  };
+
+  try {
+    const result = await get3CxDailyManagerStats('2026-10-13');
+    const reportUrl = requestedUrls.find((url) => url.includes('ReportExtensionStatisticsByGroup'));
+    const byExtension = new Map(result.managers.map((manager) => [manager.extension_3cx, manager]));
+
+    assert.equal(result.totals.entrants.total, 7);
+    assert.equal(result.aggregationMode, 'extension-summary');
+    assert.equal(result.totals.entrants.repondus, 5);
+    assert.equal(result.totals.entrants.nonRepondus, 2);
+    assert.equal(result.totals.sortants.total, 11);
+    assert.equal(result.totals.sortants.repondus, 8);
+    assert.equal(result.totals.sortants.nonRepondus, 3);
+    assert.equal(result.totals.entrants.tempsCommunicationSecondes, 600);
+    assert.equal(result.totals.sortants.tempsCommunicationSecondes, 1260);
+    assert.equal(byExtension.get('101').entrants.dureeMoyenneSecondes, 120);
+    assert.equal(byExtension.get('103').sortants.dureeMoyenneSecondes, 180);
+    assert.ok(reportUrl.includes("groupNumber='GRP2'"));
+    assert.ok(reportUrl.includes(encodeURIComponent('2026-10-12T23:00:00.000Z')));
+    assert.ok(reportUrl.includes(encodeURIComponent('2026-10-13T23:00:00.000Z')));
+  } finally {
+    global.fetch = originalFetch;
+    for (const key of envKeys) {
+      if (originalEnv[key] === undefined) delete process.env[key];
+      else process.env[key] = originalEnv[key];
+    }
+  }
+});
+
 test('daily manager metrics deduplicate transferred legs and use explicit 3CX answer status', () => {
   const calls = [
     {

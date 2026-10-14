@@ -521,10 +521,85 @@ function aggregateDailyManagerStats(rows, managers, selectedDate) {
   return {
     date: selectedDate,
     timeZone: CALLS_TIME_ZONE,
+    aggregationMode: 'call-details',
     totalAppels: totals.sortants.total + totals.entrants.total,
     totals,
     managers: [...managerStats.values()].sort((left, right) => left.name.localeCompare(right.name, 'fr')),
   };
+}
+
+function aggregateDailyExtensionStats(rows, managers, selectedDate) {
+  const managerStats = new Map();
+  const managersByExtension = new Map();
+  for (const manager of managers) {
+    const stats = createDailyManagerStats(manager);
+    managerStats.set(String(manager.id), stats);
+    const extension = normalizeExtension(manager.extension_3cx);
+    if (extension) managersByExtension.set(extension, stats);
+  }
+
+  for (const row of rows) {
+    const manager = managersByExtension.get(normalizeExtension(row.Dn));
+    if (!manager) continue;
+
+    for (const [key, answeredCount, unansweredCount, talkingDuration] of [
+      ['entrants', 'InboundAnsweredCount', 'InboundUnansweredCount', 'InboundAnsweredTalkingDur'],
+      ['sortants', 'OutboundAnsweredCount', 'OutboundUnansweredCount', 'OutboundAnsweredTalkingDur'],
+    ]) {
+      const section = manager[key];
+      section.repondus += Math.max(0, Number(row[answeredCount]) || 0);
+      section.nonRepondus += Math.max(0, Number(row[unansweredCount]) || 0);
+      section.total = section.repondus + section.nonRepondus;
+      section.tempsCommunicationSecondes += durationToSeconds(row[talkingDuration]);
+    }
+  }
+
+  for (const manager of managerStats.values()) {
+    manager.sortants.dureeMoyenneSecondes = manager.sortants.repondus
+      ? manager.sortants.tempsCommunicationSecondes / manager.sortants.repondus
+      : 0;
+    manager.entrants.dureeMoyenneSecondes = manager.entrants.repondus
+      ? manager.entrants.tempsCommunicationSecondes / manager.entrants.repondus
+      : 0;
+  }
+
+  const totals = [...managerStats.values()].reduce((total, manager) => {
+    for (const direction of ['sortants', 'entrants']) {
+      total[direction].total += manager[direction].total;
+      total[direction].repondus += manager[direction].repondus;
+      total[direction].nonRepondus += manager[direction].nonRepondus;
+      total[direction].tempsCommunicationSecondes += manager[direction].tempsCommunicationSecondes;
+    }
+    return total;
+  }, {
+    sortants: { total: 0, repondus: 0, nonRepondus: 0, tempsCommunicationSecondes: 0, dureeMoyenneSecondes: 0 },
+    entrants: { total: 0, repondus: 0, nonRepondus: 0, tempsCommunicationSecondes: 0, dureeMoyenneSecondes: 0 },
+  });
+  totals.sortants.dureeMoyenneSecondes = totals.sortants.repondus
+    ? totals.sortants.tempsCommunicationSecondes / totals.sortants.repondus
+    : 0;
+  totals.entrants.dureeMoyenneSecondes = totals.entrants.repondus
+    ? totals.entrants.tempsCommunicationSecondes / totals.entrants.repondus
+    : 0;
+
+  return {
+    date: selectedDate,
+    timeZone: CALLS_TIME_ZONE,
+    aggregationMode: 'extension-summary',
+    totalAppels: totals.sortants.total + totals.entrants.total,
+    totals,
+    managers: [...managerStats.values()].sort((left, right) => left.name.localeCompare(right.name, 'fr')),
+  };
+}
+
+async function fetchExtensionStatisticsRows(token, period = getReportPeriod()) {
+  const groupNumber = String(process.env.THREECX_GROUP_NUMBER || 'GRP2').replace(/'/g, '');
+  return fetchReportRows(
+    'ReportExtensionStatisticsByGroup',
+    'Pbx.GetExtensionStatisticsByGroupData',
+    `groupNumber='${groupNumber}',periodFrom=${period.from},periodTo=${period.to},callArea=0`,
+    token,
+  );
 }
 
 async function get3CxDailyManagerStats(date) {
@@ -533,6 +608,7 @@ async function get3CxDailyManagerStats(date) {
   if (cached && Date.now() - cached.cachedAt < DAILY_STATS_CACHE_TTL) return cached.data;
 
   let rows;
+  let extensionStatsRows;
   if (process.env.THREECX_API_URL) {
     const token = await getAccessToken();
     try {
@@ -541,11 +617,18 @@ async function get3CxDailyManagerStats(date) {
       if (error.statusCode !== 401 && error.statusCode !== 403) throw error;
 
       console.warn(`3CX ${error.reportName || 'call log report'} returned ${error.statusCode}; trying inbound and outbound reports for the selected day.`);
-      const [inbound, outbound] = await fetchDirectionalRows(token, period);
-      rows = [
-        ...inbound.map((row) => ({ ...row, Direction: 'Inbound' })),
-        ...outbound.map((row) => ({ ...row, Direction: 'Outbound' })),
-      ];
+      try {
+        const [inbound, outbound] = await fetchDirectionalRows(token, period);
+        rows = [
+          ...inbound.map((row) => ({ ...row, Direction: 'Inbound' })),
+          ...outbound.map((row) => ({ ...row, Direction: 'Outbound' })),
+        ];
+      } catch (directionalError) {
+        if (directionalError.statusCode !== 401 && directionalError.statusCode !== 403) throw directionalError;
+
+        console.warn(`3CX ${directionalError.reportName || 'directional call report'} returned ${directionalError.statusCode}; using per-extension daily statistics.`);
+        extensionStatsRows = await fetchExtensionStatisticsRows(token, period);
+      }
     }
   } else {
     if (process.env.NODE_ENV === 'production') {
@@ -554,7 +637,10 @@ async function get3CxDailyManagerStats(date) {
     rows = Array.isArray(mockData?.threeCx?.calls) ? mockData.threeCx.calls : [];
   }
 
-  const data = aggregateDailyManagerStats(rows, await getGestionnaires(), period.date);
+  const managers = await getGestionnaires();
+  const data = extensionStatsRows
+    ? aggregateDailyExtensionStats(extensionStatsRows, managers, period.date)
+    : aggregateDailyManagerStats(rows, managers, period.date);
   dailyManagerStatsCache.set(period.date, { data, cachedAt: Date.now() });
   if (dailyManagerStatsCache.size > 7) {
     const oldestDate = dailyManagerStatsCache.keys().next().value;
@@ -633,13 +719,7 @@ async function fetchExtensionMissedFrom3CX() {
   let rows;
   try {
     const token = await getAccessToken();
-    const { from, to } = getReportPeriod();
-    rows = await fetchReportRows(
-      'ReportExtensionStatisticsByGroup',
-      'Pbx.GetExtensionStatisticsByGroupData',
-      `groupNumber='${groupNumber}',periodFrom=${from},periodTo=${to},callArea=0`,
-      token,
-    );
+    rows = await fetchExtensionStatisticsRows(token, getReportPeriod());
   } catch (error) {
     if (error.statusCode !== 401 && error.statusCode !== 403) throw error;
     console.warn(`3CX extension statistics returned ${error.statusCode}; using unanswered counts from the inbound report.`);

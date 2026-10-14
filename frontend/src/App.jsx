@@ -1231,9 +1231,12 @@ function getMissedCallSeverity(count) {
   return { label: 'Normal', row: 'border-emerald-400/20 bg-emerald-500/5 text-emerald-100', badge: 'bg-emerald-400/20 text-emerald-100' };
 }
 
-function TVDailyDataState({ loading, error }) {
+function TVDailyDataState({ loading, error, data }) {
   if (loading) return <p className="py-4 text-center text-sm font-semibold text-cyan-200">Chargement des appels 3CX de la journée…</p>;
   if (error) return <div role="alert" className="rounded-xl border border-rose-500/40 bg-rose-500/15 px-4 py-3 text-sm text-rose-100">Données 3CX indisponibles : {error}</div>;
+  if (data?.aggregationMode === 'extension-summary') {
+    return <div role="status" className="rounded-xl border border-amber-400/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">3CX refuse l’accès au détail des appels : chiffres issus du rapport agrégé par extension. Les transferts ne peuvent pas être dédoublonnés individuellement dans cette vue.</div>;
+  }
   return null;
 }
 
@@ -1253,7 +1256,7 @@ function TVDailyCallsSlide({ date, onDateChange, data, loading, error }) {
       <div className="mb-4">
         <TVDailyDateControls date={date} onDateChange={onDateChange} />
       </div>
-      <TVDailyDataState loading={loading} error={error} />
+      <TVDailyDataState loading={loading} error={error} data={data} />
       {data && !loading && !error && (
         <>
           <div className="mx-auto mb-4 grid max-w-7xl grid-cols-2 gap-3 xl:grid-cols-4">
@@ -1382,7 +1385,7 @@ function TVDailyRankingsSlide({ date, onDateChange, data, loading, error }) {
       <div className="mb-4">
         <TVDailyDateControls date={date} onDateChange={onDateChange} />
       </div>
-      <TVDailyDataState loading={loading} error={error} />
+      <TVDailyDataState loading={loading} error={error} data={data} />
       {data && !loading && !error && (
         <>
           <div className={`mb-4 rounded-3xl border p-5 md:p-6 ${missedTotal ? getMissedCallSeverity(missedTotal).row : 'border-emerald-400/40 bg-emerald-950/50 text-emerald-100'}`}>
