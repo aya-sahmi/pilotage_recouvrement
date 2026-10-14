@@ -286,8 +286,8 @@ async function fetchCallLogRows(token, period = getReportPeriod()) {
   );
 }
 
-async function fetchDirectionalRows(token) {
-  const { from, to } = getReportPeriod();
+async function fetchDirectionalRows(token, period = getReportPeriod()) {
+  const { from, to } = period;
   return Promise.all([
     fetchReportRows('ReportInboundCalls', 'Pbx.GetInboundCalls', `periodFrom=${from},periodTo=${to},trunkDns='',callsType=0`, token),
     fetchReportRows('ReportOutboundCalls', 'Pbx.GetOutboundCalls', `periodFrom=${from},periodTo=${to},trunkDns='',callsType=0`, token),
@@ -535,7 +535,18 @@ async function get3CxDailyManagerStats(date) {
   let rows;
   if (process.env.THREECX_API_URL) {
     const token = await getAccessToken();
-    rows = await fetchCallLogRows(token, period);
+    try {
+      rows = await fetchCallLogRows(token, period);
+    } catch (error) {
+      if (error.statusCode !== 401 && error.statusCode !== 403) throw error;
+
+      console.warn(`3CX ${error.reportName || 'call log report'} returned ${error.statusCode}; trying inbound and outbound reports for the selected day.`);
+      const [inbound, outbound] = await fetchDirectionalRows(token, period);
+      rows = [
+        ...inbound.map((row) => ({ ...row, Direction: 'Inbound' })),
+        ...outbound.map((row) => ({ ...row, Direction: 'Outbound' })),
+      ];
+    }
   } else {
     if (process.env.NODE_ENV === 'production') {
       throw new Error('THREECX_API_URL n’est pas configurée sur le serveur.');

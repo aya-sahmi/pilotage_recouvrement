@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 
 const {
   aggregateDailyManagerStats,
+  get3CxDailyManagerStats,
   getDailyReportPeriod,
 } = require('../services/3cx.service');
 
@@ -19,6 +20,76 @@ test('daily report period follows the 3CX business timezone and rejects invalid 
   assert.equal(decodeURIComponent(period.from), '2026-10-13T23:00:00.000Z');
   assert.equal(decodeURIComponent(period.to), '2026-10-14T23:00:00.000Z');
   assert.throws(() => getDailyReportPeriod('2026-02-30'), { statusCode: 400, error: 'INVALID_DATE' });
+});
+
+test('daily stats fall back to directional reports with the selected date when call-log access is denied', async () => {
+  const originalFetch = global.fetch;
+  const envKeys = ['DATABASE_URL', 'THREECX_API_URL', 'THREECX_CLIENT_ID', 'THREECX_CLIENT_SECRET', 'NODE_ENV'];
+  const originalEnv = Object.fromEntries(envKeys.map((key) => [key, process.env[key]]));
+  const requestedUrls = [];
+  process.env.THREECX_API_URL = 'https://pbx.example:5001';
+  process.env.THREECX_CLIENT_ID = 'test-client';
+  process.env.THREECX_CLIENT_SECRET = 'test-secret';
+  delete process.env.DATABASE_URL;
+  delete process.env.NODE_ENV;
+
+  global.fetch = async (url) => {
+    const requestUrl = String(url);
+    requestedUrls.push(requestUrl);
+    if (requestUrl.endsWith('/connect/token')) {
+      return { ok: true, status: 200, json: async () => ({ access_token: 'test-token', expires_in: 300 }) };
+    }
+    if (requestUrl.includes('ReportCallLogData')) {
+      return { ok: false, status: 401, json: async () => ({}) };
+    }
+    const inbound = requestUrl.includes('ReportInboundCalls');
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({
+        value: inbound
+          ? [{
+            MainCallHistoryId: 'daily-inbound',
+            CallHistoryId: 'daily-inbound-leg',
+            Direction: 'Inbound',
+            DestinationDn: '101',
+            StartTime: '2026-10-14T10:00:00+01:00',
+            Answered: true,
+            Status: 'Answered',
+            TalkingDuration: 'PT2M',
+          }]
+          : [{
+            MainCallHistoryId: 'daily-outbound',
+            CallHistoryId: 'daily-outbound-leg',
+            Direction: 'Outbound',
+            SourceDn: '103',
+            StartTime: '2026-10-14T11:00:00+01:00',
+            Answered: false,
+            Status: 'Unanswered',
+          }],
+      }),
+    };
+  };
+
+  try {
+    const result = await get3CxDailyManagerStats('2026-10-14');
+    const inbound = requestedUrls.find((url) => url.includes('ReportInboundCalls'));
+    const outbound = requestedUrls.find((url) => url.includes('ReportOutboundCalls'));
+
+    assert.equal(result.totals.entrants.repondus, 1);
+    assert.equal(result.totals.entrants.tempsCommunicationSecondes, 120);
+    assert.equal(result.totals.sortants.nonRepondus, 1);
+    assert.ok(inbound.includes(encodeURIComponent('2026-10-13T23:00:00.000Z')));
+    assert.ok(inbound.includes(encodeURIComponent('2026-10-14T23:00:00.000Z')));
+    assert.ok(outbound.includes(encodeURIComponent('2026-10-13T23:00:00.000Z')));
+    assert.ok(outbound.includes(encodeURIComponent('2026-10-14T23:00:00.000Z')));
+  } finally {
+    global.fetch = originalFetch;
+    for (const key of envKeys) {
+      if (originalEnv[key] === undefined) delete process.env[key];
+      else process.env[key] = originalEnv[key];
+    }
+  }
 });
 
 test('daily manager metrics deduplicate transferred legs and use explicit 3CX answer status', () => {
