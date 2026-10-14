@@ -1,4 +1,4 @@
-const { fetchCallsFrom3CX, get3CxOverview, get3CxManagerStats } = require('../services/3cx.service');
+const { fetchCallsFrom3CX, get3CxDailyManagerStats, get3CxOverview, get3CxManagerStats } = require('../services/3cx.service');
 const { query } = require('../config/database');
 const mockData = require('../data/mock-data');
 
@@ -23,6 +23,15 @@ async function get3cxKpi(req, res, next) {
 async function get3cxGestionnaires(req, res, next) {
   try {
     const data = await get3CxManagerStats();
+    res.json({ success: true, data });
+  } catch (error) {
+    next(error);
+  }
+}
+
+async function get3cxDaily(req, res, next) {
+  try {
+    const data = await get3CxDailyManagerStats(req.query.date);
     res.json({ success: true, data });
   } catch (error) {
     next(error);
@@ -59,6 +68,7 @@ module.exports = {
   get3cx,
   get3cxKpi,
   get3cxGestionnaires,
+  get3cxDaily,
   get3cxNonRattaches,
   sync3cx,
 };

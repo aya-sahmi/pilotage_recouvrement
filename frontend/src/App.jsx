@@ -804,6 +804,8 @@ const tvScreens = [
   { id: 'objectives', label: 'Objectifs' },
   { id: 'portfolio', label: 'Portefeuille' },
   { id: 'calls', label: 'Activité 3CX' },
+  { id: 'calls-daily', label: 'Appels 3CX du jour' },
+  { id: 'calls-rankings', label: 'Classements 3CX du jour' },
 ];
 
 function TVSlideHeading({ eyebrow, title, subtitle }) {
@@ -1167,7 +1169,248 @@ function TVCallsPodiumSlide() {
   );
 }
 
-function TVSlideContent({ screenId }) {
+function toLocalDateInputValue(date) {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Africa/Casablanca',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(date);
+  const dateParts = Object.fromEntries(parts.map(({ type, value }) => [type, value]));
+  return `${dateParts.year}-${dateParts.month}-${dateParts.day}`;
+}
+
+function TVDailyDateControls({ date, onDateChange }) {
+  const today = toLocalDateInputValue(new Date());
+  const yesterdayDate = new Date(`${today}T12:00:00.000Z`);
+  yesterdayDate.setUTCDate(yesterdayDate.getUTCDate() - 1);
+  const yesterday = toLocalDateInputValue(yesterdayDate);
+
+  return (
+    <div className="flex flex-wrap items-center justify-center gap-2">
+      <button
+        type="button"
+        onClick={() => onDateChange(today)}
+        aria-pressed={date === today}
+        className={`rounded-xl border px-4 py-2 text-sm font-bold transition ${date === today ? 'border-cyan-300 bg-cyan-300 text-slate-950' : 'border-white/15 bg-white/5 text-white hover:bg-white/10'}`}
+      >
+        Aujourd’hui
+      </button>
+      <button
+        type="button"
+        onClick={() => onDateChange(yesterday)}
+        aria-pressed={date === yesterday}
+        className={`rounded-xl border px-4 py-2 text-sm font-bold transition ${date === yesterday ? 'border-cyan-300 bg-cyan-300 text-slate-950' : 'border-white/15 bg-white/5 text-white hover:bg-white/10'}`}
+      >
+        Hier
+      </button>
+      <label className="flex items-center gap-2 rounded-xl border border-white/15 bg-slate-900/70 px-3 py-2 text-sm font-bold text-slate-200">
+        Date
+        <input
+          type="date"
+          value={date}
+          max={today}
+          onChange={(event) => event.target.value && onDateChange(event.target.value)}
+          className="rounded-lg bg-transparent text-white outline-none [color-scheme:dark]"
+        />
+      </label>
+    </div>
+  );
+}
+
+function getMissedCallSeverity(count) {
+  if (count >= 10) {
+    return { label: 'Alerte forte', row: 'border-rose-300/70 bg-rose-600/30 text-rose-100', badge: 'bg-rose-300 text-rose-950 animate-pulse' };
+  }
+  if (count >= 5) {
+    return { label: 'Élevé', row: 'border-rose-500/40 bg-rose-500/15 text-rose-100', badge: 'bg-rose-500/30 text-rose-100' };
+  }
+  if (count > 0) {
+    return { label: 'Surveillance', row: 'border-amber-400/30 bg-amber-500/10 text-amber-100', badge: 'bg-amber-400/20 text-amber-100' };
+  }
+  return { label: 'Normal', row: 'border-emerald-400/20 bg-emerald-500/5 text-emerald-100', badge: 'bg-emerald-400/20 text-emerald-100' };
+}
+
+function TVDailyDataState({ loading, error }) {
+  if (loading) return <p className="py-4 text-center text-sm font-semibold text-cyan-200">Chargement des appels 3CX de la journée…</p>;
+  if (error) return <div role="alert" className="rounded-xl border border-rose-500/40 bg-rose-500/15 px-4 py-3 text-sm text-rose-100">Données 3CX indisponibles : {error}</div>;
+  return null;
+}
+
+function TVDailyCallsSlide({ date, onDateChange, data, loading, error }) {
+  const managers = [...(data?.managers || [])]
+    .sort((left, right) => (right.entrants.nonRepondus - left.entrants.nonRepondus) || left.name.localeCompare(right.name, 'fr'));
+  const totals = data?.totals;
+  const totalCommunication = (totals?.sortants.tempsCommunicationSecondes || 0) + (totals?.entrants.tempsCommunicationSecondes || 0);
+
+  return (
+    <section className="py-3">
+      <TVSlideHeading
+        eyebrow="Suivi quotidien • 3CX"
+        title="Activité téléphonique"
+        subtitle={`${data?.date || date} • Fuseau ${data?.timeZone || 'Africa/Casablanca'}`}
+      />
+      <div className="mb-4">
+        <TVDailyDateControls date={date} onDateChange={onDateChange} />
+      </div>
+      <TVDailyDataState loading={loading} error={error} />
+      {data && !loading && !error && (
+        <>
+          <div className="mx-auto mb-4 grid max-w-7xl grid-cols-2 gap-3 xl:grid-cols-4">
+            <StatCard label="Appels attribués" value={formatNumber(data.totalAppels)} accent="from-cyan-500 to-blue-600" icon={PhoneCall} subtitle="Appels uniques par gestionnaire" />
+            <StatCard label="Entrants non répondus" value={formatNumber(totals.entrants.nonRepondus)} accent={totals.entrants.nonRepondus >= 5 ? 'from-rose-500 to-red-700' : 'from-amber-500 to-orange-600'} icon={BellRing} subtitle="Indicateur prioritaire" />
+            <StatCard label="Sortants répondus" value={formatNumber(totals.sortants.repondus)} accent="from-emerald-500 to-green-700" icon={PhoneCall} subtitle={`${formatNumber(totals.sortants.nonRepondus)} non répondus`} />
+            <StatCard label="Communication totale" value={formatDuration(Math.round(totalCommunication))} accent="from-violet-500 to-purple-700" icon={Gauge} subtitle="Temps parlé 3CX" />
+          </div>
+
+          {totals.entrants.nonRepondus > 0 && (
+            <div className={`mx-auto mb-4 flex max-w-7xl flex-wrap items-center justify-between gap-3 rounded-2xl border px-5 py-3 ${getMissedCallSeverity(totals.entrants.nonRepondus).row}`}>
+              <div>
+                <p className="text-xs font-black uppercase tracking-[0.25em]">Alerte appels entrants non répondus</p>
+                <p className="mt-1 text-sm">Les lignes rouges signalent les gestionnaires à traiter en priorité.</p>
+              </div>
+              <span className={`rounded-xl px-4 py-2 text-lg font-black ${getMissedCallSeverity(totals.entrants.nonRepondus).badge}`}>
+                {formatNumber(totals.entrants.nonRepondus)} • {getMissedCallSeverity(totals.entrants.nonRepondus).label}
+              </span>
+            </div>
+          )}
+
+          <div className="max-h-[52vh] overflow-auto rounded-2xl border border-white/15 bg-slate-950/70">
+            <table className="w-full min-w-[1500px] border-collapse text-left text-sm text-slate-100">
+              <thead className="sticky top-0 z-10 bg-slate-900">
+                <tr className="text-center text-xs font-black uppercase tracking-[0.18em] text-cyan-200">
+                  <th rowSpan="2" className="sticky left-0 z-20 min-w-52 border-b border-r border-white/10 bg-slate-900 px-4 py-3 text-left">Gestionnaire</th>
+                  <th colSpan="5" className="border-b border-r border-white/10 px-3 py-3">Appels sortants</th>
+                  <th colSpan="5" className="border-b border-white/10 px-3 py-3">Appels entrants</th>
+                </tr>
+                <tr className="text-center text-[11px] font-bold uppercase text-slate-300">
+                  {['Total', 'Répondus', 'Non répondus', 'Temps communication', 'Durée moyenne', 'Total', 'Répondus', 'Non répondus', 'Temps communication', 'Durée moyenne'].map((label, index) => (
+                    <th key={`${label}-${index}`} className={`whitespace-nowrap border-b border-white/10 px-3 py-2 ${index === 4 ? 'border-r border-white/20' : ''}`}>{label}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {managers.map((manager) => {
+                  const severity = getMissedCallSeverity(manager.entrants.nonRepondus);
+                  return (
+                    <tr key={manager.id} className={`border-b ${severity.row}`}>
+                      <th className={`sticky left-0 z-[1] border-r border-white/10 px-4 py-3 text-left font-bold ${severity.row}`}>
+                        <div>{manager.name}</div>
+                        <div className="mt-0.5 text-[10px] font-semibold uppercase tracking-wider opacity-70">
+                          {manager.extension_3cx ? `Poste ${manager.extension_3cx}` : 'Sans extension'}
+                        </div>
+                      </th>
+                      <td className="px-3 py-3 text-center">{formatNumber(manager.sortants.total)}</td>
+                      <td className="px-3 py-3 text-center text-emerald-200">{formatNumber(manager.sortants.repondus)}</td>
+                      <td className="px-3 py-3 text-center">{formatNumber(manager.sortants.nonRepondus)}</td>
+                      <td className="whitespace-nowrap px-3 py-3 text-center">{formatDuration(Math.round(manager.sortants.tempsCommunicationSecondes))}</td>
+                      <td className="whitespace-nowrap border-r border-white/20 px-3 py-3 text-center">{formatDuration(Math.round(manager.sortants.dureeMoyenneSecondes))}</td>
+                      <td className="px-3 py-3 text-center">{formatNumber(manager.entrants.total)}</td>
+                      <td className="px-3 py-3 text-center text-emerald-200">{formatNumber(manager.entrants.repondus)}</td>
+                      <td className="px-3 py-3 text-center">
+                        <span className={`inline-flex min-w-10 justify-center rounded-lg px-2 py-1 font-black ${severity.badge}`}>{formatNumber(manager.entrants.nonRepondus)}</span>
+                      </td>
+                      <td className="whitespace-nowrap px-3 py-3 text-center">{formatDuration(Math.round(manager.entrants.tempsCommunicationSecondes))}</td>
+                      <td className="whitespace-nowrap px-3 py-3 text-center">{formatDuration(Math.round(manager.entrants.dureeMoyenneSecondes))}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+              <tfoot className="sticky bottom-0 z-[2] border-t-2 border-cyan-300/40 bg-slate-900 font-black text-white">
+                <tr>
+                  <th className="sticky left-0 border-r border-white/10 bg-slate-900 px-4 py-3 text-left">TOTAL</th>
+                  <td className="px-3 py-3 text-center">{formatNumber(totals.sortants.total)}</td>
+                  <td className="px-3 py-3 text-center text-emerald-200">{formatNumber(totals.sortants.repondus)}</td>
+                  <td className="px-3 py-3 text-center">{formatNumber(totals.sortants.nonRepondus)}</td>
+                  <td className="whitespace-nowrap px-3 py-3 text-center">{formatDuration(Math.round(totals.sortants.tempsCommunicationSecondes))}</td>
+                  <td className="whitespace-nowrap border-r border-white/20 px-3 py-3 text-center">{formatDuration(Math.round(totals.sortants.dureeMoyenneSecondes))}</td>
+                  <td className="px-3 py-3 text-center">{formatNumber(totals.entrants.total)}</td>
+                  <td className="px-3 py-3 text-center text-emerald-200">{formatNumber(totals.entrants.repondus)}</td>
+                  <td className="px-3 py-3 text-center text-rose-200">{formatNumber(totals.entrants.nonRepondus)}</td>
+                  <td className="whitespace-nowrap px-3 py-3 text-center">{formatDuration(Math.round(totals.entrants.tempsCommunicationSecondes))}</td>
+                  <td className="whitespace-nowrap px-3 py-3 text-center">{formatDuration(Math.round(totals.entrants.dureeMoyenneSecondes))}</td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+          {!managers.length && <p className="py-8 text-center text-slate-300">Aucun gestionnaire actif avec des données 3CX pour cette date.</p>}
+        </>
+      )}
+    </section>
+  );
+}
+
+function TVDailyRankingCard({ title, managers, direction, metric, priority = false }) {
+  const ranking = [...managers].sort((left, right) => (
+    (right[direction][metric] - left[direction][metric]) || left.name.localeCompare(right.name, 'fr')
+  ));
+  const medals = ['🥇', '🥈', '🥉'];
+
+  return (
+    <section className={`rounded-2xl border p-4 ${priority ? 'border-rose-400/60 bg-gradient-to-br from-rose-950/90 via-red-950/70 to-slate-950 shadow-xl shadow-rose-950/40' : 'border-white/10 bg-slate-900/65'}`}>
+      <h2 className={`mb-3 text-lg font-black ${priority ? 'text-rose-100 md:text-xl' : 'text-white'}`}>{title}</h2>
+      <div className="max-h-[28vh] space-y-2 overflow-y-auto pr-1">
+        {ranking.map((manager, index) => {
+          const value = manager[direction][metric];
+          const severity = getMissedCallSeverity(direction === 'entrants' && metric === 'nonRepondus' ? value : 0);
+          return (
+            <div key={manager.id} className={`flex items-center justify-between gap-3 rounded-xl border px-3 py-2 ${priority ? severity.row : 'border-white/5 bg-black/20 text-slate-100'}`}>
+              <div className="flex min-w-0 items-center gap-2">
+                <span className="w-8 shrink-0 text-center text-lg">{medals[index] || `#${index + 1}`}</span>
+                <span className="truncate font-semibold">{manager.name}</span>
+              </div>
+              <span className={`shrink-0 text-lg font-black ${priority ? '' : 'text-cyan-200'}`}>{formatNumber(value)}</span>
+            </div>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
+function TVDailyRankingsSlide({ date, onDateChange, data, loading, error }) {
+  const managers = data?.managers || [];
+  const missedTotal = data?.totals?.entrants.nonRepondus || 0;
+
+  return (
+    <section className="py-3">
+      <TVSlideHeading
+        eyebrow="Classements quotidiens • 3CX"
+        title="Réponse aux appels"
+        subtitle={`${data?.date || date} • Classements par gestionnaire`}
+      />
+      <div className="mb-4">
+        <TVDailyDateControls date={date} onDateChange={onDateChange} />
+      </div>
+      <TVDailyDataState loading={loading} error={error} />
+      {data && !loading && !error && (
+        <>
+          <div className={`mb-4 rounded-3xl border p-5 md:p-6 ${missedTotal ? getMissedCallSeverity(missedTotal).row : 'border-emerald-400/40 bg-emerald-950/50 text-emerald-100'}`}>
+            <div className="flex flex-wrap items-center justify-between gap-4">
+              <div>
+                <p className="text-xs font-black uppercase tracking-[0.3em]">Classement prioritaire • entrants non répondus</p>
+                <h2 className="mt-1 text-2xl font-black md:text-4xl">
+                  {missedTotal ? `${formatNumber(missedTotal)} appel${missedTotal > 1 ? 's' : ''} à traiter` : 'Aucun appel entrant non répondu'}
+                </h2>
+              </div>
+              <span className={`rounded-2xl px-5 py-3 text-xl font-black md:text-2xl ${missedTotal ? getMissedCallSeverity(missedTotal).badge : 'bg-emerald-400/20 text-emerald-100'}`}>
+                {missedTotal ? getMissedCallSeverity(missedTotal).label : 'Normal'}
+              </span>
+            </div>
+          </div>
+          <div className="grid gap-3 xl:grid-cols-2">
+            <TVDailyRankingCard title="🔴 Entrants non répondus — priorité" managers={managers} direction="entrants" metric="nonRepondus" priority />
+            <TVDailyRankingCard title="🥇 Entrants répondus" managers={managers} direction="entrants" metric="repondus" />
+            <TVDailyRankingCard title="🥇 Sortants répondus" managers={managers} direction="sortants" metric="repondus" />
+            <TVDailyRankingCard title="Sortants non répondus" managers={managers} direction="sortants" metric="nonRepondus" />
+          </div>
+        </>
+      )}
+    </section>
+  );
+}
+
+function TVSlideContent({ screenId, dailyCallsProps }) {
   switch (screenId) {
     case 'dashboard':
       return <DashboardPage />;
@@ -1183,6 +1426,10 @@ function TVSlideContent({ screenId }) {
       return <TVPortfolioSlide />;
     case 'calls':
       return <TVCallsPodiumSlide />;
+    case 'calls-daily':
+      return <TVDailyCallsSlide {...dailyCallsProps} />;
+    case 'calls-rankings':
+      return <TVDailyRankingsSlide {...dailyCallsProps} />;
     default:
       return null;
   }
@@ -1193,8 +1440,14 @@ function TVPage() {
   const [paused, setPaused] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(Boolean(document.fullscreenElement));
   const [fullscreenError, setFullscreenError] = useState('');
+  const [dailyDate, setDailyDate] = useState(() => toLocalDateInputValue(new Date()));
+  const [dailyCallsResult, setDailyCallsResult] = useState(null);
   const navigate = useNavigate();
   const activeScreen = tvScreens[screenIndex];
+  const isDailyCallsScreen = activeScreen.id === 'calls-daily' || activeScreen.id === 'calls-rankings';
+  const dailyCalls = dailyCallsResult?.date === dailyDate ? dailyCallsResult.data : null;
+  const dailyCallsError = dailyCallsResult?.date === dailyDate ? dailyCallsResult.error : '';
+  const dailyCallsLoading = isDailyCallsScreen && dailyCallsResult?.date !== dailyDate;
 
   useEffect(() => {
     const updateFullscreen = () => setIsFullscreen(Boolean(document.fullscreenElement));
@@ -1209,6 +1462,20 @@ function TVPage() {
     }, 18000);
     return () => clearInterval(timer);
   }, [paused]);
+
+  useEffect(() => {
+    if (!isDailyCallsScreen) return undefined;
+    let mounted = true;
+    apiFetch(`/3cx/daily?date=${encodeURIComponent(dailyDate)}`)
+      .then((payload) => mounted && setDailyCallsResult({ date: dailyDate, data: payload, error: '' }))
+      .catch((error) => {
+        if (!mounted) return;
+        setDailyCallsResult({ date: dailyDate, data: null, error: error.message || 'Connexion 3CX impossible.' });
+      })
+    return () => {
+      mounted = false;
+    };
+  }, [isDailyCallsScreen, dailyDate]);
 
   const changeScreen = (direction) => {
     setScreenIndex((current) => (current + direction + tvScreens.length) % tvScreens.length);
@@ -1278,7 +1545,16 @@ function TVPage() {
             transition={{ duration: 0.55, ease: 'easeInOut' }}
             className="h-full"
           >
-            <TVSlideContent screenId={activeScreen.id} />
+            <TVSlideContent
+              screenId={activeScreen.id}
+              dailyCallsProps={{
+                date: dailyDate,
+                onDateChange: setDailyDate,
+                data: dailyCalls,
+                loading: dailyCallsLoading,
+                error: dailyCallsError,
+              }}
+            />
           </motion.div>
         </AnimatePresence>
       </main>
