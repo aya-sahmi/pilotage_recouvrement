@@ -5,6 +5,7 @@ const {
   aggregateDailyManagerStats,
   get3CxDailyManagerStats,
   getDailyReportPeriod,
+  normalizeStoredCallsForDailyStats,
 } = require('../services/3cx.service');
 
 const managers = [
@@ -12,6 +13,41 @@ const managers = [
   { id: 2, nom: 'Lemoine', prenom: 'Hugo', extension_3cx: '102' },
   { id: 3, nom: 'Dupont', prenom: 'Claire', extension_3cx: '103' },
 ];
+
+test('stored 3CX calls are normalized for daily aggregation', () => {
+  const calls = normalizeStoredCallsForDailyStats([
+    {
+      call_id: 'stored-answered',
+      gestionnaire_id: 1,
+      extension_3cx: '101',
+      direction: 'entrant',
+      date_debut: '2026-10-14T10:00:00+01:00',
+      duree_secondes: 90,
+      statut: 'answered',
+    },
+    {
+      call_id: 'stored-missed',
+      gestionnaire_id: 2,
+      direction: 'sortant',
+      date_debut: '2026-10-14T11:00:00+01:00',
+      duree_secondes: 0,
+      statut: 'non répondu',
+    },
+    {
+      call_id: 'stored-unknown',
+      direction: 'entrant',
+      date_debut: '2026-10-14T12:00:00+01:00',
+      statut: 'inconnu',
+    },
+  ]);
+
+  assert.equal(calls.length, 2);
+  assert.equal(calls[0].Direction, 'entrant');
+  assert.equal(calls[0].Answered, true);
+  assert.equal(calls[0].TalkingDuration, 90);
+  assert.equal(calls[1].Direction, 'sortant');
+  assert.equal(calls[1].Answered, false);
+});
 
 test('daily report period follows the 3CX business timezone and rejects invalid dates', () => {
   const period = getDailyReportPeriod('2026-10-14');
@@ -83,6 +119,41 @@ test('daily stats fall back to directional reports with the selected date when c
     assert.ok(inbound.includes(encodeURIComponent('2026-10-14T23:00:00.000Z')));
     assert.ok(outbound.includes(encodeURIComponent('2026-10-13T23:00:00.000Z')));
     assert.ok(outbound.includes(encodeURIComponent('2026-10-14T23:00:00.000Z')));
+  } finally {
+    global.fetch = originalFetch;
+    for (const key of envKeys) {
+      if (originalEnv[key] === undefined) delete process.env[key];
+      else process.env[key] = originalEnv[key];
+    }
+  }
+});
+
+test('daily stats fall back to appels_3cx when all 3CX daily reports are unauthorized', async () => {
+  const originalFetch = global.fetch;
+  const envKeys = ['DATABASE_URL', 'THREECX_API_URL', 'THREECX_CLIENT_ID', 'THREECX_CLIENT_SECRET', 'NODE_ENV'];
+  const originalEnv = Object.fromEntries(envKeys.map((key) => [key, process.env[key]]));
+  const requestedUrls = [];
+  process.env.THREECX_API_URL = 'https://pbx.example:5001';
+  process.env.THREECX_CLIENT_ID = 'test-client';
+  process.env.THREECX_CLIENT_SECRET = 'test-secret';
+  delete process.env.DATABASE_URL;
+  delete process.env.NODE_ENV;
+
+  global.fetch = async (url) => {
+    const requestUrl = String(url);
+    requestedUrls.push(requestUrl);
+    if (requestUrl.endsWith('/connect/token')) {
+      return { ok: true, status: 200, json: async () => ({ access_token: 'test-token', expires_in: 300 }) };
+    }
+    return { ok: false, status: 401, json: async () => ({}) };
+  };
+
+  try {
+    await assert.rejects(
+      get3CxDailyManagerStats('2026-10-02'),
+      /rapports 3CX sont refusés et le repli sur la base appels_3cx a échoué.*DATABASE_URL/
+    );
+    assert.ok(requestedUrls.some((url) => url.includes('ReportExtensionStatisticsByGroup')));
   } finally {
     global.fetch = originalFetch;
     for (const key of envKeys) {

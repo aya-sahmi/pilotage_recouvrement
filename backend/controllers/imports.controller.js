@@ -1,5 +1,11 @@
-const { parsePerformanceWorkbook, parsePortefeuilleWorkbook } = require('../services/excel-import.service');
+const {
+  parsePerformanceWorkbook,
+  parsePortefeuilleWorkbook,
+  parseResponsablesRankingWorkbook,
+  parseClientsRankingWorkbook,
+} = require('../services/excel-import.service');
 const { pool, query } = require('../config/database');
+const { persistRankingImport } = require('../services/classement.service');
 
 function normalizeImportStatus(status) {
   if (!status) return 'TERMINE';
@@ -250,9 +256,73 @@ async function importPortefeuille(req, res, next) {
   }
 }
 
+async function importResponsablesRanking(req, res, next) {
+  try {
+    const file = req.file || req.files?.[0];
+    if (!file) {
+      return res.status(400).json({ success: false, message: 'Veuillez fournir un fichier Excel.', error: 'MISSING_FILE' });
+    }
+
+    const parsed = await parseResponsablesRankingWorkbook(file.buffer || file.data);
+    const result = await persistRankingImport({
+      type: 'responsables',
+      fileName: file.originalname,
+      rows: parsed.rows,
+    });
+
+    res.json({
+      success: true,
+      data: { ...parsed, import_id: result.importId },
+      message: 'Import du classement des responsables terminé.',
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
+async function importClientsRanking(req, res, next) {
+  try {
+    const file = req.file || req.files?.[0];
+    if (!file) {
+      return res.status(400).json({ success: false, message: 'Veuillez fournir un fichier Excel.', error: 'MISSING_FILE' });
+    }
+
+    const parsed = await parseClientsRankingWorkbook(file.buffer || file.data);
+    const result = await persistRankingImport({
+      type: 'clients',
+      fileName: file.originalname,
+      rows: parsed.rows,
+    });
+
+    res.json({
+      success: true,
+      data: { ...parsed, import_id: result.importId },
+      message: 'Import du classement des clients terminé.',
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
 async function getImports(req, res, next) {
   try {
-    const { rows } = await query('SELECT * FROM imports ORDER BY date_import DESC LIMIT 50');
+    const { rows } = await query(`
+      SELECT type_import, nom_fichier, date_import, nombre_lignes,
+             nombre_lignes_importees, nombre_lignes_erreur, statut
+      FROM imports
+      UNION ALL
+      SELECT 'CLASSEMENT RESPONSABLES' AS type_import, nom_fichier, date_import,
+             nombre_lignes, nombre_lignes AS nombre_lignes_importees,
+             0 AS nombre_lignes_erreur, 'TERMINE' AS statut
+      FROM classement_responsables_imports
+      UNION ALL
+      SELECT 'CLASSEMENT CLIENTS' AS type_import, nom_fichier, date_import,
+             nombre_lignes, nombre_lignes AS nombre_lignes_importees,
+             0 AS nombre_lignes_erreur, 'TERMINE' AS statut
+      FROM classement_clients_imports
+      ORDER BY date_import DESC
+      LIMIT 50
+    `);
     res.json({ success: true, data: rows || [] });
   } catch (error) {
     next(error);
@@ -262,5 +332,7 @@ async function getImports(req, res, next) {
 module.exports = {
   importPerformance,
   importPortefeuille,
+  importResponsablesRanking,
+  importClientsRanking,
   getImports,
 };

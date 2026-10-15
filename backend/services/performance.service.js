@@ -65,6 +65,8 @@ async function getPerformanceDashboard() {
         .map((row) => ({
           gestionnaire_id: row.gestionnaire_id,
           manager: row.nom_gestionnaire || row.nom_affichage || `${row.prenom || ''} ${row.nom || ''}`.trim(),
+          prenom: row.prenom || null,
+          nom: row.nom || null,
           photo_url: row.photo_url || null,
           commission: Number(row.commission || 0),
           objectif: Number(row.objectif || 0),

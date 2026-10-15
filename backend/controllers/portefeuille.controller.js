@@ -1,5 +1,6 @@
 const { getPortefeuilleSnapshot, getPortefeuilleKpis } = require('../services/portefeuille.service');
 const { query } = require('../config/database');
+const { getLatestResponsibleRanking, getLatestClientRanking } = require('../services/classement.service');
 
 async function getPortefeuille(req, res, next) {
   try {
@@ -37,9 +38,29 @@ async function getPortefeuilleTypesLot(req, res, next) {
   }
 }
 
+async function getResponsablesRanking(req, res, next) {
+  try {
+    const data = await getLatestResponsibleRanking();
+    res.json({ success: true, data });
+  } catch (error) {
+    next(error);
+  }
+}
+
+async function getClientsRanking(req, res, next) {
+  try {
+    const data = await getLatestClientRanking();
+    res.json({ success: true, data });
+  } catch (error) {
+    next(error);
+  }
+}
+
 module.exports = {
   getPortefeuille,
   getPortefeuilleKpisHandler,
   getPortefeuilleStatuts,
   getPortefeuilleTypesLot,
+  getResponsablesRanking,
+  getClientsRanking,
 };

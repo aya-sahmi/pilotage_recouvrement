@@ -114,7 +114,7 @@ async function getGestionnairesByExtension() {
 async function getGestionnaires() {
   try {
     const { rows } = await query(`
-      SELECT id, extension_3cx, nom, prenom
+      SELECT id, extension_3cx, nom, prenom, photo_url
       FROM gestionnaires
       WHERE actif = TRUE
     `);
@@ -424,6 +424,7 @@ function createDailyManagerStats(manager) {
     id: Number(manager.id),
     nom: manager.nom || '',
     prenom: manager.prenom || '',
+    photo_url: manager.photo_url || null,
     name: name || 'Gestionnaire',
     extension_3cx: manager.extension_3cx || null,
     sortants: { total: 0, repondus: 0, nonRepondus: 0, tempsCommunicationSecondes: 0, dureeMoyenneSecondes: 0 },
@@ -592,6 +593,38 @@ function aggregateDailyExtensionStats(rows, managers, selectedDate) {
   };
 }
 
+function normalizeStoredCallsForDailyStats(rows) {
+  return rows.flatMap((row) => {
+    const answered = getAnsweredStatus({ Status: row.statut });
+    if (answered === null) return [];
+
+    return [{
+      ...row,
+      Direction: row.direction,
+      StartTime: row.date_debut,
+      MainCallHistoryId: row.call_id,
+      CdrId: row.call_id,
+      TalkingDuration: row.duree_secondes,
+      Answered: answered,
+      Status: answered ? 'Answered' : 'Unanswered',
+    }];
+  });
+}
+
+async function fetchStoredDailyCallRows(period) {
+  const { rows } = await query(
+    `SELECT call_id, gestionnaire_id, extension_3cx, direction,
+            date_debut, duree_secondes, statut
+     FROM appels_3cx
+     WHERE date_debut >= $1::timestamptz
+       AND date_debut < $2::timestamptz
+     ORDER BY date_debut ASC`,
+    [decodeURIComponent(period.from), decodeURIComponent(period.to)]
+  );
+
+  return normalizeStoredCallsForDailyStats(rows || []);
+}
+
 async function fetchExtensionStatisticsRows(token, period = getReportPeriod()) {
   const groupNumber = String(process.env.THREECX_GROUP_NUMBER || 'GRP2').replace(/'/g, '');
   return fetchReportRows(
@@ -609,6 +642,7 @@ async function get3CxDailyManagerStats(date) {
 
   let rows;
   let extensionStatsRows;
+  let usedDatabaseFallback = false;
   if (process.env.THREECX_API_URL) {
     const token = await getAccessToken();
     try {
@@ -627,7 +661,21 @@ async function get3CxDailyManagerStats(date) {
         if (directionalError.statusCode !== 401 && directionalError.statusCode !== 403) throw directionalError;
 
         console.warn(`3CX ${directionalError.reportName || 'directional call report'} returned ${directionalError.statusCode}; using per-extension daily statistics.`);
-        extensionStatsRows = await fetchExtensionStatisticsRows(token, period);
+        try {
+          extensionStatsRows = await fetchExtensionStatisticsRows(token, period);
+        } catch (extensionStatsError) {
+          if (extensionStatsError.statusCode !== 401 && extensionStatsError.statusCode !== 403) throw extensionStatsError;
+
+          console.warn(`3CX ${extensionStatsError.reportName || 'extension statistics report'} returned ${extensionStatsError.statusCode}; using stored calls from appels_3cx.`);
+          try {
+            rows = await fetchStoredDailyCallRows(period);
+            usedDatabaseFallback = true;
+          } catch (databaseError) {
+            throw new Error(
+              `Les rapports 3CX sont refusés et le repli sur la base appels_3cx a échoué : ${databaseError.message}`
+            );
+          }
+        }
       }
     }
   } else {
@@ -641,12 +689,13 @@ async function get3CxDailyManagerStats(date) {
   const data = extensionStatsRows
     ? aggregateDailyExtensionStats(extensionStatsRows, managers, period.date)
     : aggregateDailyManagerStats(rows, managers, period.date);
-  dailyManagerStatsCache.set(period.date, { data, cachedAt: Date.now() });
+  const result = usedDatabaseFallback ? { ...data, aggregationMode: 'database-fallback' } : data;
+  dailyManagerStatsCache.set(period.date, { data: result, cachedAt: Date.now() });
   if (dailyManagerStatsCache.size > 7) {
     const oldestDate = dailyManagerStatsCache.keys().next().value;
     dailyManagerStatsCache.delete(oldestDate);
   }
-  return data;
+  return result;
 }
 
 async function fetchCallsFrom3CX() {
@@ -765,6 +814,7 @@ async function get3CxManagerStats() {
       id,
       nom: manager.nom || '',
       prenom: manager.prenom || '',
+      photo_url: manager.photo_url || null,
       extension_3cx: manager.extension_3cx || null,
       total_appels: 0,
       total_sortants: 0,
@@ -798,6 +848,7 @@ module.exports = {
   get3CxOverview,
   get3CxManagerStats,
   aggregateDailyManagerStats,
+  normalizeStoredCallsForDailyStats,
   getDateInTimeZone,
   getDailyReportPeriod,
 };

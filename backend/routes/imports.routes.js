@@ -1,6 +1,12 @@
 const express = require('express');
 const multer = require('multer');
-const { importPerformance, importPortefeuille, getImports } = require('../controllers/imports.controller');
+const {
+  importPerformance,
+  importPortefeuille,
+  importResponsablesRanking,
+  importClientsRanking,
+  getImports,
+} = require('../controllers/imports.controller');
 
 const router = express.Router();
 const upload = multer({
@@ -16,5 +22,7 @@ const upload = multer({
 router.get('/', getImports);
 router.post('/performance', upload.single('file'), importPerformance);
 router.post('/portefeuille', upload.single('file'), importPortefeuille);
+router.post('/responsables', upload.single('file'), importResponsablesRanking);
+router.post('/clients', upload.single('file'), importClientsRanking);
 
 module.exports = router;

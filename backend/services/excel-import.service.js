@@ -17,10 +17,145 @@ function normalizeNumber(value) {
   if (value === null || value === undefined || value === '') return 0;
   if (typeof value === 'number') return Number.isFinite(value) ? value : 0;
   const cleaned = String(value)
+    .replace(/\s/g, '')
     .replace(/[^0-9,.-]/g, '')
-    .replace(',', '.');
-  const parsed = Number(cleaned);
+    .replace(/(?!^)-/g, '');
+  const lastComma = cleaned.lastIndexOf(',');
+  const lastDot = cleaned.lastIndexOf('.');
+  let normalized = cleaned;
+
+  if (lastComma !== -1 && lastDot !== -1) {
+    const decimalSeparator = lastComma > lastDot ? ',' : '.';
+    const thousandsSeparator = decimalSeparator === ',' ? '.' : ',';
+    normalized = cleaned
+      .replaceAll(thousandsSeparator, '')
+      .replace(decimalSeparator, '.');
+  } else {
+    const separator = lastComma === -1 ? '.' : ',';
+    const lastSeparator = Math.max(lastComma, lastDot);
+    const decimalDigits = cleaned.length - lastSeparator - 1;
+
+    if (lastSeparator !== -1 && decimalDigits > 0 && decimalDigits <= 2) {
+      normalized = `${cleaned.slice(0, lastSeparator).replaceAll(separator, '')}.${cleaned.slice(lastSeparator + 1)}`;
+    } else {
+      normalized = cleaned.replaceAll(separator, '');
+    }
+  }
+
+  const parsed = Number(normalized);
   return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function getWorkbookRecords(sheet) {
+  const headers = sheet.getRow(1).values.slice(1).map((value) => normalizeHeader(value));
+  const records = [];
+
+  sheet.eachRow({ includeEmpty: true }, (row, rowNumber) => {
+    if (rowNumber === 1) return;
+
+    const record = {};
+    row.values.slice(1).forEach((value, index) => {
+      const header = headers[index];
+      if (header) record[header] = value;
+    });
+    records.push({ record, rowNumber });
+  });
+
+  return { headers, records };
+}
+
+function invalidRankingWorkbook(message) {
+  const error = new Error(message);
+  error.statusCode = 400;
+  error.error = 'INVALID_RANKING_WORKBOOK';
+  return error;
+}
+
+function isTotalRow(value) {
+  return normalizeHeader(value).startsWith('total');
+}
+
+function getRequiredField(record, fields) {
+  return fields.map((field) => record[field]).find((value) => value !== undefined && value !== null && String(value).trim() !== '');
+}
+
+async function parseResponsablesRankingWorkbook(fileBuffer) {
+  const workbook = new ExcelJS.Workbook();
+  await workbook.xlsx.load(fileBuffer);
+  const sheet = workbook.worksheets[0];
+  if (!sheet) throw invalidRankingWorkbook('Le fichier Excel ne contient aucune feuille.');
+
+  const { headers, records } = getWorkbookRecords(sheet);
+  const nameHeader = ['nom_et_prenom', 'nom_prenom', 'nomprenom', 'responsable', 'nom'];
+  const hasName = nameHeader.some((header) => headers.includes(header));
+  const hasEncaissement = headers.includes('encaissement');
+  const hasCommission = ['commission', 'commision', 'commission_srm'].some((header) => headers.includes(header));
+  const hasObjectif = headers.includes('objectif');
+
+  if (!hasName || !hasEncaissement || !hasCommission || !hasObjectif) {
+    throw invalidRankingWorkbook('Colonnes requises : Nom et Prenom, Encaissement, Commission et Objectif.');
+  }
+
+  const rows = records.flatMap(({ record, rowNumber }) => {
+    const rawName = getRequiredField(record, nameHeader);
+    if (!rawName || isTotalRow(rawName)) return [];
+
+    const encaissement = normalizeNumber(record.encaissement);
+    const commission = normalizeNumber(getRequiredField(record, ['commission', 'commision', 'commission_srm']));
+    const objectif = normalizeNumber(record.objectif);
+    return [{
+      nomAffichage: normalizeText(rawName),
+      encaissement,
+      commission,
+      objectif,
+      photoUrl: normalizeText(record.photo_url || record.photourl || ''),
+      ligne: rowNumber,
+    }];
+  });
+
+  if (!rows.length) throw invalidRankingWorkbook('Aucune ligne responsable importable n’a été trouvée.');
+
+  return {
+    rows,
+    stats: { lignes: rows.length, importees: rows.length, erreurs: 0, statut: 'OK' },
+  };
+}
+
+async function parseClientsRankingWorkbook(fileBuffer) {
+  const workbook = new ExcelJS.Workbook();
+  await workbook.xlsx.load(fileBuffer);
+  const sheet = workbook.worksheets[0];
+  if (!sheet) throw invalidRankingWorkbook('Le fichier Excel ne contient aucune feuille.');
+
+  const { headers, records } = getWorkbookRecords(sheet);
+  const nameHeader = ['nom_client', 'client', 'nom'];
+  const hasName = nameHeader.some((header) => headers.includes(header));
+  const hasEncaissement = headers.includes('encaissement');
+  const hasCommission = ['commission_srm', 'commission', 'commision_srm'].some((header) => headers.includes(header));
+
+  if (!hasName || !hasEncaissement || !hasCommission) {
+    throw invalidRankingWorkbook('Colonnes requises : Nom client, Encaissement et Commission SRM.');
+  }
+
+  const rows = records.flatMap(({ record, rowNumber }) => {
+    const rawName = getRequiredField(record, nameHeader);
+    if (!rawName || isTotalRow(rawName)) return [];
+
+    return [{
+      nom: normalizeText(rawName),
+      encaissement: normalizeNumber(record.encaissement),
+      commissionSrm: normalizeNumber(getRequiredField(record, ['commission_srm', 'commission', 'commision_srm'])),
+      photoUrl: normalizeText(record.photo_url || record.photourl || ''),
+      ligne: rowNumber,
+    }];
+  });
+
+  if (!rows.length) throw invalidRankingWorkbook('Aucune ligne client importable n’a été trouvée.');
+
+  return {
+    rows,
+    stats: { lignes: rows.length, importees: rows.length, erreurs: 0, statut: 'OK' },
+  };
 }
 
 function normalizeDate(value) {
@@ -164,4 +299,6 @@ async function parsePortefeuilleWorkbook(fileBuffer) {
 module.exports = {
   parsePerformanceWorkbook,
   parsePortefeuilleWorkbook,
+  parseResponsablesRankingWorkbook,
+  parseClientsRankingWorkbook,
 };

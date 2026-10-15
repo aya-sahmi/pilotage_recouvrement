@@ -58,6 +58,16 @@ function apiFetch(endpoint, options = {}) {
     });
 }
 
+function resolvePhotoUrl(photoUrl) {
+  const value = String(photoUrl || '').trim();
+  if (!value) return '';
+  if (/^(https?:|data:|blob:)/i.test(value)) return value;
+
+  const apiUrl = new URL(API_BASE, window.location.origin);
+  const apiPath = apiUrl.pathname.replace(/\/api\/?$/, '').replace(/\/?$/, '/');
+  return new URL(value.replace(/^\/+/, ''), `${apiUrl.origin}${apiPath}`).href;
+}
+
 const navigation = [
   { label: 'Dashboard', to: '/', icon: LayoutDashboard },
   { label: 'Classement Général', to: '/classement', icon: TrophyIcon },
@@ -81,6 +91,15 @@ function formatCurrency(value) {
     style: 'currency',
     currency: 'MAD',
     maximumFractionDigits: 0,
+  }).format(Number(value || 0));
+}
+
+function formatCurrencyPrecise(value) {
+  return new Intl.NumberFormat('fr-FR', {
+    style: 'currency',
+    currency: 'MAD',
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
   }).format(Number(value || 0));
 }
 
@@ -539,7 +558,12 @@ function ControlePage() {
 
 function ImportsPage() {
   const [results, setResults] = useState([]);
-  const [fileMap, setFileMap] = useState({ performance: null, portefeuille: null });
+  const [fileMap, setFileMap] = useState({
+    performance: null,
+    portefeuille: null,
+    responsables: null,
+    clients: null,
+  });
 
   useEffect(() => {
     apiFetch('/imports')
@@ -584,6 +608,18 @@ function ImportsPage() {
           <input type="file" accept=".xlsx,.xls" onChange={(e) => setFileMap((prev) => ({ ...prev, portefeuille: e.target.files?.[0] || null }))} className="mb-4 block w-full text-sm text-slate-300 file:mr-4 file:rounded-2xl file:border-0 file:bg-violet-500 file:px-4 file:py-3 file:font-semibold file:text-white" />
           <button onClick={() => submitImport('portefeuille')} className="rounded-2xl bg-gradient-to-r from-violet-500 to-purple-600 px-4 py-3 font-bold text-white">Importer portefeuille</button>
         </div>
+        <div className="rounded-3xl border border-white/10 bg-white/5 p-5">
+          <h3 className="mb-2 text-xl font-bold text-white">Type 3 : Classement des responsables</h3>
+          <p className="mb-4 text-sm text-slate-400">Colonnes : Nom et Prenom, Encaissement, Commission, Objectif. La ligne Total est ignorée. Photo URL est facultative ; une photo déjà enregistrée est conservée si la cellule est vide.</p>
+          <input type="file" accept=".xlsx,.xls" onChange={(e) => setFileMap((prev) => ({ ...prev, responsables: e.target.files?.[0] || null }))} className="mb-4 block w-full text-sm text-slate-300 file:mr-4 file:rounded-2xl file:border-0 file:bg-amber-400 file:px-4 file:py-3 file:font-semibold file:text-slate-950" />
+          <button onClick={() => submitImport('responsables')} className="rounded-2xl bg-gradient-to-r from-amber-400 to-orange-500 px-4 py-3 font-bold text-slate-950">Importer le classement responsables</button>
+        </div>
+        <div className="rounded-3xl border border-white/10 bg-white/5 p-5">
+          <h3 className="mb-2 text-xl font-bold text-white">Type 4 : Classement des clients</h3>
+          <p className="mb-4 text-sm text-slate-400">Colonnes : Nom client, Encaissement, Commission SRM. La ligne Total est ignorée. Photo URL est facultative ; une photo déjà enregistrée est conservée si la cellule est vide.</p>
+          <input type="file" accept=".xlsx,.xls" onChange={(e) => setFileMap((prev) => ({ ...prev, clients: e.target.files?.[0] || null }))} className="mb-4 block w-full text-sm text-slate-300 file:mr-4 file:rounded-2xl file:border-0 file:bg-emerald-400 file:px-4 file:py-3 file:font-semibold file:text-slate-950" />
+          <button onClick={() => submitImport('clients')} className="rounded-2xl bg-gradient-to-r from-emerald-400 to-teal-500 px-4 py-3 font-bold text-slate-950">Importer le classement clients</button>
+        </div>
       </div>
 
       <div className="mt-8 rounded-3xl border border-white/10 bg-white/5 p-4">
@@ -596,7 +632,10 @@ function ImportsPage() {
         </div>
         {(results || []).map((row) => (
           <div key={`${row.nom_fichier}-${row.date_import}`} className="mb-3 grid grid-cols-[1.3fr_0.8fr_0.6fr_0.6fr_0.6fr] items-center gap-3 rounded-2xl border border-white/10 bg-slate-900/40 px-3 py-3 text-white">
-            <span>{row.nom_fichier}</span>
+            <span>
+              <span className="mr-2 text-xs font-bold uppercase text-cyan-300">{row.type_import || 'Import'}</span>
+              {row.nom_fichier}
+            </span>
             <span>{row.date_import ? new Date(row.date_import).toLocaleDateString('fr-FR') : '—'}</span>
             <span>{row.nombre_lignes || row.lignes || 0}</span>
             <span>{row.lignes_importees || row.importees || 0}</span>
@@ -802,7 +841,9 @@ const tvScreens = [
   { id: 'last-three', label: 'Les trois derniers' },
   { id: 'performance', label: 'Performance' },
   { id: 'objectives', label: 'Objectifs' },
-  { id: 'portfolio', label: 'Portefeuille' },
+  { id: 'full-ranking', label: 'Classement complet gestionnaires' },
+  { id: 'portfolio-responsables', label: 'Classement responsables' },
+  { id: 'portfolio-clients', label: 'Classement clients' },
   { id: 'calls', label: 'Activité 3CX' },
   { id: 'calls-daily', label: 'Appels 3CX du jour' },
   { id: 'calls-rankings', label: 'Classements 3CX du jour' },
@@ -818,18 +859,38 @@ function TVSlideHeading({ eyebrow, title, subtitle }) {
   );
 }
 
-function TVAvatar({ name, className = 'h-20 w-20' }) {
-  const initials = String(name || '?')
-    .split(/\s+/)
+function TVAvatar({ name, firstName, lastName, photoUrl, className = 'h-20 w-20' }) {
+  const [failedPhotoUrl, setFailedPhotoUrl] = useState(null);
+  const initials = [firstName, lastName]
     .filter(Boolean)
-    .slice(0, 2)
-    .map((part) => part[0])
+    .map((part) => String(part).trim()[0])
+    .filter(Boolean)
     .join('')
-    .toUpperCase();
+    .toUpperCase()
+    || String(name || '?')
+      .split(/\s+/)
+      .filter(Boolean)
+      .slice(0, 2)
+      .map((part) => part[0])
+      .join('')
+      .toUpperCase();
+
+  const resolvedPhotoUrl = resolvePhotoUrl(photoUrl);
 
   return (
-    <div className={`flex shrink-0 items-center justify-center rounded-full border border-white/20 bg-gradient-to-br from-cyan-400/30 to-indigo-500/40 font-black text-white ${className}`}>
-      {initials || '?'}
+    <div className={`relative flex shrink-0 items-center justify-center overflow-hidden rounded-full border-2 border-white/30 bg-gradient-to-br from-cyan-400/30 to-indigo-500/40 font-black text-white shadow-lg shadow-black/30 ${className}`}>
+      {resolvedPhotoUrl && failedPhotoUrl !== resolvedPhotoUrl ? (
+        <img
+          src={resolvedPhotoUrl}
+          alt={name || `${firstName || ''} ${lastName || ''}`.trim()}
+          className="absolute inset-0 h-full w-full rounded-full object-cover object-[center_25%]"
+          loading="eager"
+          decoding="async"
+          onError={() => setFailedPhotoUrl(resolvedPhotoUrl)}
+        />
+      ) : (
+        <span className="relative z-10">{initials || '?'}</span>
+      )}
     </div>
   );
 }
@@ -852,6 +913,44 @@ function TVRankingSlide({ variant }) {
   if (loading) return <div className="py-24 text-center text-xl text-slate-300">Chargement du classement…</div>;
   if (!data?.rows?.length) {
     return <EmptyState title="Classement indisponible" description="Importez un classement pour afficher les résultats en mode TV." />;
+  }
+
+  if (variant === 'full-ranking') {
+    const columnSize = Math.ceil(data.rows.length / 3);
+    const columns = [
+      data.rows.slice(0, columnSize),
+      data.rows.slice(columnSize, columnSize * 2),
+      data.rows.slice(columnSize * 2),
+    ];
+
+    return (
+      <section className="min-h-[calc(100vh-8rem)] ">
+        <TVSlideHeading  title="Tous les gestionnaires"/>
+        <div className="mx-auto grid max-w-7xl gap-4 lg:grid-cols-3">
+          {columns.map((rows, columnIndex) => (
+            <div key={columnIndex} className="space-y-2">
+              {rows.map((row) => (
+                <article key={row.id || row.manager} className="flex items-center gap-3 rounded-2xl border border-white/10 bg-slate-900/75 px-4 py-3">
+                  <span className="w-10 shrink-0 text-center text-lg font-black text-cyan-200">#{row.rank}</span>
+                  <TVAvatar
+                    name={row.manager}
+                    firstName={row.prenom}
+                    lastName={row.nom}
+                    photoUrl={row.photo_url}
+                    className="h-14 w-14 text-base"
+                  />
+                  <span className="min-w-0 flex-1 truncate font-bold text-white">{row.manager}</span>
+                  <div className="shrink-0 text-right">
+                    <p className="text-lg font-black text-emerald-200">{formatTaux(row.score ?? row.taux)}</p>
+                    <p className="text-xs text-slate-400">{formatCurrency(row.commission)}</p>
+                  </div>
+                </article>
+              ))}
+            </div>
+          ))}
+        </div>
+      </section>
+    );
   }
 
   if (variant === 'podium') {
@@ -888,7 +987,13 @@ function TVRankingSlide({ variant }) {
                 <div className={`mb-5 flex h-14 w-14 items-center justify-center rounded-full text-2xl font-black ${isFirst ? 'bg-amber-300 text-slate-950' : 'bg-white/10 text-white'}`}>
                   {rank}
                 </div>
-                <TVAvatar name={row.manager} className={isFirst ? 'h-28 w-28 text-3xl' : 'h-20 w-20 text-2xl'} />
+                <TVAvatar
+                  name={row.manager}
+                  firstName={row.prenom}
+                  lastName={row.nom}
+                  photoUrl={row.photo_url}
+                  className={isFirst ? 'h-28 w-28 text-3xl' : 'h-20 w-20 text-2xl'}
+                />
                 <h2 className={`mt-5 font-black text-white ${isFirst ? 'text-3xl md:text-4xl' : 'text-2xl md:text-3xl'}`}>{row.manager}</h2>
                 <p className={`mt-3 font-black ${isFirst ? 'text-4xl text-amber-200' : 'text-3xl text-cyan-200'}`}>{formatTaux(row.score ?? row.taux)}</p>
                 <p className="mt-2 text-sm uppercase tracking-[0.25em] text-slate-400">Taux d’atteinte</p>
@@ -918,7 +1023,13 @@ function TVRankingSlide({ variant }) {
               <span className="text-sm font-bold uppercase tracking-[0.3em] text-rose-200">Rang #{row.rank}</span>
               <span className="rounded-full border border-rose-300/30 bg-rose-400/10 px-3 py-1 text-xs font-bold text-rose-200">À ACCOMPAGNER</span>
             </div>
-            <TVAvatar name={row.manager} className="h-20 w-20 border-rose-300/30 bg-gradient-to-br from-rose-400/30 to-red-700/40 text-2xl" />
+            <TVAvatar
+              name={row.manager}
+              firstName={row.prenom}
+              lastName={row.nom}
+              photoUrl={row.photo_url}
+              className="h-32 w-32 border-rose-300/30 bg-gradient-to-br from-rose-400/30 to-red-700/40 text-2xl"
+            />
             <h2 className="mt-6 text-2xl font-black text-white md:text-3xl">{row.manager}</h2>
             <div className="mt-6 text-4xl font-black text-rose-200">{formatTaux(row.score ?? row.taux)}</div>
             <p className="mt-2 text-sm uppercase tracking-[0.25em] text-rose-100/60">Taux d’atteinte</p>
@@ -1006,54 +1117,133 @@ function TVPerformanceSlide({ objectives = false }) {
   );
 }
 
-function TVPortfolioSlide() {
+function TVPortfolioSlide({ variant }) {
   const [data, setData] = useState(null);
+  const [error, setError] = useState('');
+  const isResponsibleRanking = variant === 'responsables';
 
   useEffect(() => {
     let mounted = true;
-    apiFetch('/portefeuille')
-      .then((payload) => mounted && setData(payload))
-      .catch(() => mounted && setData(null));
+    const endpoint = isResponsibleRanking
+      ? '/portefeuille/classements/responsables'
+      : '/portefeuille/classements/clients';
+    apiFetch(endpoint)
+      .then((payload) => {
+        if (mounted) setData(isResponsibleRanking ? { responsables: payload } : { clients: payload });
+      })
+      .catch((requestError) => {
+        if (mounted) setError(requestError.message || 'Les classements n’ont pas pu être chargés.');
+      });
     return () => {
       mounted = false;
     };
-  }, []);
+  }, [isResponsibleRanking]);
 
-  if (!data) return <EmptyState title="Portefeuille indisponible" description="Les indicateurs du portefeuille n’ont pas pu être chargés." />;
+  if (error) return <EmptyState title="Classements indisponibles" description={error} />;
+  if (!data) return <div className="py-24 text-center text-xl text-slate-300">Chargement des classements…</div>;
 
-  const managers = [...(data.byManager || [])].sort((a, b) => Number(b.dossiers || 0) - Number(a.dossiers || 0)).slice(0, 8);
-  const maxDossiers = Math.max(1, ...managers.map((row) => Number(row.dossiers || 0)));
+  const responsibleRows = [...(data.responsables?.rows || [])]
+    .sort((left, right) => Number(right.taux || 0) - Number(left.taux || 0))
+    .slice(0, 5);
+  const clientRows = [...(data.clients?.rows || [])]
+    .sort((left, right) => (Number(right.encaissement || 0) - Number(left.encaissement || 0)) || left.nom.localeCompare(right.nom, 'fr'));
+  const importedAt = (rankingImport) => rankingImport?.date_import
+    ? new Date(rankingImport.date_import).toLocaleDateString('fr-FR')
+    : 'Aucun import disponible';
+
   return (
-    <section className="py-8">
-      <TVSlideHeading eyebrow="Vue portefeuille" title="Portefeuille dossiers" subtitle="Répartition et points d’attention" />
-      <div className="mx-auto grid max-w-6xl gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        {[
-          { label: 'Dossiers', value: formatNumber(data.totalDossiers), color: 'text-cyan-200' },
-          { label: 'Solde total', value: formatCurrency(data.soldeTotal), color: 'text-violet-200' },
-          { label: 'Nouveaux dossiers', value: formatNumber(data.nouveauxDossiers), color: 'text-amber-200' },
-          { label: 'Non affectés', value: formatNumber(data.dossiersSansGestionnaire), color: 'text-rose-200' },
-        ].map((item) => (
-          <div key={item.label} className="rounded-3xl border border-white/10 bg-white/5 p-5">
-            <p className="text-xs uppercase tracking-[0.22em] text-slate-400">{item.label}</p>
-            <p className={`mt-3 text-3xl font-black ${item.color}`}>{item.value}</p>
-          </div>
-        ))}
-      </div>
-      <div className="mx-auto mt-6 max-w-6xl rounded-3xl border border-white/10 bg-white/5 p-6">
-        <h2 className="mb-5 text-xl font-bold text-white">Principales répartitions par gestionnaire</h2>
-        <div className="grid gap-x-8 gap-y-4 md:grid-cols-2">
-          {managers.map((row, index) => (
-            <div key={row.name || index}>
-              <div className="mb-2 flex justify-between gap-4 text-sm">
-                <span className="truncate font-semibold text-slate-200">{row.name || row.label}</span>
-                <span className="font-black text-cyan-200">{formatNumber(row.dossiers)}</span>
-              </div>
-              <div className="h-2.5 overflow-hidden rounded-full bg-white/10">
-                <div className="h-full rounded-full bg-gradient-to-r from-cyan-400 to-indigo-400" style={{ width: `${Math.max(3, Number(row.dossiers || 0) / maxDossiers * 100)}%` }} />
-              </div>
+    <section className="min-h-screen px-4 ">
+      <TVSlideHeading
+        eyebrow=""
+        title={isResponsibleRanking ? 'Classement des responsables' : 'Classement des clients'}
+        />
+      <div className={`mx-auto ${isResponsibleRanking ? 'max-w-5xl' : 'max-w-7xl'}`}>
+        {isResponsibleRanking ? (
+        <section className="rounded-3xl border border-amber-300/20 bg-slate-900/70 p-4 shadow-xl md:p-5">
+          <div className="mb-4 flex flex-wrap items-end justify-between gap-2 border-b border-white/10 pb-3">
+            <div>
+              <p className="text-xs font-bold uppercase tracking-[0.25em] text-amber-300">Classement par taux</p>
             </div>
-          ))}
-        </div>
+            <p className="text-xs text-slate-400">Import : {importedAt(data.responsables?.import)}</p>
+          </div>
+          {responsibleRows.length ? (
+            <div className="max-h-[70vh] space-y-3 overflow-y-auto pr-1">
+              {responsibleRows.map((row, index) => {
+                const name = row.nom_affichage || `${row.prenom || ''} ${row.nom || ''}`.trim();
+                const progress = Math.min(100, Math.max(0, Number(row.taux || 0)));
+                return (
+                  <article key={row.id} className="rounded-2xl border border-white/10 bg-black/20 p-3">
+                    <div className="flex items-center gap-3">
+                      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-amber-300/15 text-sm font-black text-amber-200">#{index + 1}</span>
+                      <TVAvatar
+                        name={name}
+                        firstName={row.prenom}
+                        lastName={row.nom}
+                        photoUrl={row.photo_url}
+                        className="h-16 w-16 text-lg"
+                      />
+                      <span className="min-w-0 flex-1 truncate font-bold text-white">{name}</span>
+                      <span className="text-xl font-black text-amber-200">{formatTaux(row.taux)}</span>
+                    </div>
+                    <div className="mt-3 grid grid-cols-3 gap-2 text-right">
+                      {[
+                        { label: 'Encaissement', value: row.encaissement },
+                        { label: 'Commission', value: row.commission },
+                        { label: 'Objectif', value: row.objectif },
+                      ].map((metric) => (
+                        <div key={metric.label} className="min-w-0">
+                          <p className="truncate text-[10px] uppercase tracking-wide text-slate-400">{metric.label}</p>
+                          <p className="truncate text-xs font-bold text-slate-100">{formatCurrencyPrecise(metric.value)}</p>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="mt-3 h-2 overflow-hidden rounded-full bg-white/10">
+                      <div className="h-full rounded-full bg-gradient-to-r from-amber-300 to-emerald-400" style={{ width: `${progress}%` }} />
+                    </div>
+                  </article>
+                );
+              })}
+            </div>
+          ) : (
+            <p className="py-8 text-center text-slate-400">Importez le classement Excel des responsables pour l’afficher.</p>
+          )}
+        </section>
+        ) : (
+        <section className="rounded-3xl border border-cyan-300/20 bg-slate-900/70 p-4 shadow-xl md:p-5">
+          <div className="mb-4 flex flex-wrap items-end justify-between gap-2 border-b border-white/10 pb-3">
+            <div>
+              <p className="text-xs font-bold uppercase tracking-[0.25em] text-cyan-300">Classement par encaissement</p>
+              <h2 className="mt-1 text-2xl font-black text-white">Clients ({clientRows.length})</h2>
+            </div>
+            <p className="text-xs text-slate-400">Import : {importedAt(data.clients?.import)}</p>
+          </div>
+          {clientRows.length ? (
+            <div className="grid max-h-[70vh] gap-2 overflow-y-auto pr-1 md:grid-cols-2 xl:grid-cols-3">
+              {clientRows.map((row, index) => (
+                <article key={row.id} className="flex min-w-0 items-center gap-2 rounded-xl border border-white/10 bg-black/20 px-2 py-2">
+                  <span className="w-7 shrink-0 text-center text-xs font-black text-cyan-200">#{index + 1}</span>
+                  <TVAvatar name={row.nom} photoUrl={row.photo_url} className="h-12 w-12 text-sm" />
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-bold text-white">{row.nom}</p>
+                    <div className="mt-0.5 flex flex-wrap justify-between gap-x-2 text-[10px]">
+                      <span className="text-slate-300">{formatCurrencyPrecise(row.encaissement)}</span>
+                      <span className="text-emerald-300">{formatCurrencyPrecise(row.commission_srm)}</span>
+                    </div>
+                  </div>
+                </article>
+              ))}
+            </div>
+          ) : (
+            <p className="py-8 text-center text-slate-400">Importez le classement Excel des clients pour l’afficher.</p>
+          )}
+          {clientRows.length > 0 && (
+            <div className="mt-3 flex justify-end gap-4 border-t border-white/10 pt-2 text-[10px] uppercase tracking-wide text-slate-400">
+              <span>Encaissement</span>
+              <span>Commission SRM</span>
+            </div>
+          )}
+        </section>
+        )}
       </div>
     </section>
   );
@@ -1123,7 +1313,13 @@ function TVCallsPodiumSlide() {
               <div className={`mb-3 flex h-11 w-11 items-center justify-center rounded-full text-xl font-black ${isFirst ? 'bg-amber-300 text-slate-950' : 'bg-white/10 text-white'}`}>
                 {rank}
               </div>
-              <TVAvatar name={managerName} className={isFirst ? 'h-20 w-20 text-2xl' : 'h-16 w-16 text-xl'} />
+              <TVAvatar
+                name={managerName}
+                firstName={row.prenom}
+                lastName={row.nom}
+                photoUrl={row.photo_url}
+                className={isFirst ? 'h-25 w-25 text-2xl' : 'h-25 w-25 text-xl'}
+              />
               <h2 className={`mt-3 font-black text-white ${isFirst ? 'text-xl md:text-2xl' : 'text-lg md:text-xl'}`}>{managerName}</h2>
               <p className={`mt-2 font-black ${isFirst ? 'text-3xl text-amber-200' : 'text-2xl text-cyan-200'}`}>{formatNumber(row.total_sortants || 0)}</p>
               <p className="mt-1 text-xs uppercase tracking-[0.2em] text-slate-400">Appels sortants</p>
@@ -1153,6 +1349,13 @@ function TVCallsPodiumSlide() {
                 >
                   <div className="flex min-w-0 items-center gap-3">
                     <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-rose-400/20 text-sm font-black text-rose-200">#{index + 1}</span>
+                    <TVAvatar
+                      name={managerName}
+                      firstName={row.prenom}
+                      lastName={row.nom}
+                      photoUrl={row.photo_url}
+                      className="h-10 w-10 text-xs"
+                    />
                     <span className="truncate text-base font-bold text-white md:text-lg">{managerName}</span>
                   </div>
                   <span className="shrink-0 text-xl font-black text-rose-300 md:text-2xl">
@@ -1234,8 +1437,8 @@ function getMissedCallSeverity(count) {
 function TVDailyDataState({ loading, error, data }) {
   if (loading) return <p className="py-4 text-center text-sm font-semibold text-cyan-200">Chargement des appels 3CX de la journée…</p>;
   if (error) return <div role="alert" className="rounded-xl border border-rose-500/40 bg-rose-500/15 px-4 py-3 text-sm text-rose-100">Données 3CX indisponibles : {error}</div>;
-  if (data?.aggregationMode === 'extension-summary') {
-    return <div role="status" className="rounded-xl border border-amber-400/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">3CX refuse l’accès au détail des appels : chiffres issus du rapport agrégé par extension. Les transferts ne peuvent pas être dédoublonnés individuellement dans cette vue.</div>;
+  if (data?.aggregationMode === 'database-fallback') {
+    return <div role="status" className="mb-3 rounded-xl border border-amber-400/30 bg-amber-500/10 px-4 py-2 text-center text-sm text-amber-100">Rapports 3CX refusés : données affichées depuis les appels enregistrés dans la base.</div>;
   }
   return null;
 }
@@ -1360,6 +1563,13 @@ function TVDailyRankingCard({ title, managers, direction, metric, priority = fal
             <div key={manager.id} className={`flex items-center justify-between gap-3 rounded-xl border px-3 py-2 ${priority ? severity.row : 'border-white/5 bg-black/20 text-slate-100'}`}>
               <div className="flex min-w-0 items-center gap-2">
                 <span className="w-8 shrink-0 text-center text-lg">{medals[index] || `#${index + 1}`}</span>
+                <TVAvatar
+                  name={manager.name}
+                  firstName={manager.prenom}
+                  lastName={manager.nom}
+                  photoUrl={manager.photo_url}
+                  className="h-9 w-9 text-xs"
+                />
                 <span className="truncate font-semibold">{manager.name}</span>
               </div>
               <span className={`shrink-0 text-lg font-black ${priority ? '' : 'text-cyan-200'}`}>{formatNumber(value)}</span>
@@ -1425,8 +1635,12 @@ function TVSlideContent({ screenId, dailyCallsProps }) {
       return <TVPerformanceSlide />;
     case 'objectives':
       return <TVPerformanceSlide objectives />;
-    case 'portfolio':
-      return <TVPortfolioSlide />;
+    case 'full-ranking':
+      return <TVRankingSlide variant="full-ranking" />;
+    case 'portfolio-responsables':
+      return <TVPortfolioSlide variant="responsables" />;
+    case 'portfolio-clients':
+      return <TVPortfolioSlide variant="clients" />;
     case 'calls':
       return <TVCallsPodiumSlide />;
     case 'calls-daily':
@@ -1469,16 +1683,29 @@ function TVPage() {
   useEffect(() => {
     if (!isDailyCallsScreen) return undefined;
     let mounted = true;
-    apiFetch(`/3cx/daily?date=${encodeURIComponent(dailyDate)}`)
-      .then((payload) => mounted && setDailyCallsResult({ date: dailyDate, data: payload, error: '' }))
-      .catch((error) => {
-        if (!mounted) return;
-        setDailyCallsResult({ date: dailyDate, data: null, error: error.message || 'Connexion 3CX impossible.' });
-      })
+    let requestInProgress = false;
+    const loadDailyCalls = async () => {
+      if (requestInProgress) return;
+      requestInProgress = true;
+      try {
+        const payload = await apiFetch(`/3cx/daily?date=${encodeURIComponent(dailyDate)}`);
+        if (mounted) setDailyCallsResult({ date: dailyDate, data: payload, error: '' });
+      } catch (error) {
+        if (mounted) {
+          setDailyCallsResult({ date: dailyDate, data: null, error: error.message || 'Connexion 3CX impossible.' });
+        }
+      } finally {
+        requestInProgress = false;
+      }
+    };
+
+    loadDailyCalls();
+    const refreshTimer = setInterval(loadDailyCalls, 30000);
     return () => {
       mounted = false;
+      clearInterval(refreshTimer);
     };
-  }, [isDailyCallsScreen, dailyDate]);
+  }, [isDailyCallsScreen, activeScreen.id, dailyDate]);
 
   const changeScreen = (direction) => {
     setScreenIndex((current) => (current + direction + tvScreens.length) % tvScreens.length);
