@@ -213,6 +213,11 @@ function AppShell() {
   const { pathname } = useLocation();
   const isTvMode = pathname === '/tv';
 
+  useEffect(() => {
+    document.documentElement.classList.toggle('tv-mode-4k', isTvMode);
+    return () => document.documentElement.classList.remove('tv-mode-4k');
+  }, [isTvMode]);
+
   return (
     <div className={`min-h-screen bg-slate-950 text-slate-100 ${isTvMode ? 'tv-mode' : ''}`}>
       <div className={`mx-auto flex min-h-screen ${isTvMode ? 'w-full max-w-none' : 'max-w-[2200px]'}`}>
@@ -916,32 +921,33 @@ function TVRankingSlide({ variant }) {
   }
 
   if (variant === 'full-ranking') {
-    const columnSize = Math.ceil(data.rows.length / 3);
+    const columnSize = Math.ceil(data.rows.length / 4);
     const columns = [
       data.rows.slice(0, columnSize),
       data.rows.slice(columnSize, columnSize * 2),
-      data.rows.slice(columnSize * 2),
+      data.rows.slice(columnSize * 2, columnSize * 3),
+      data.rows.slice(columnSize * 3),
     ];
 
     return (
-      <section className="min-h-[calc(100vh-8rem)] ">
-        <TVSlideHeading  title="Tous les gestionnaires"/>
-        <div className="mx-auto grid max-w-7xl gap-4 lg:grid-cols-3">
+      <section className="h-full py-2">
+        <TVSlideHeading title="Tous les gestionnaires" />
+        <div className="mx-auto grid max-w-[2400px] gap-3 sm:grid-cols-2 xl:grid-cols-4">
           {columns.map((rows, columnIndex) => (
             <div key={columnIndex} className="space-y-2">
               {rows.map((row) => (
-                <article key={row.id || row.manager} className="flex items-center gap-3 rounded-2xl border border-white/10 bg-slate-900/75 px-4 py-3">
-                  <span className="w-10 shrink-0 text-center text-lg font-black text-cyan-200">#{row.rank}</span>
+                <article key={row.id || row.manager} className="flex min-h-16 items-center gap-3 rounded-2xl border border-white/10 bg-slate-900/75 px-3 py-2">
+                  <span className="w-9 shrink-0 text-center text-base font-black text-cyan-200">#{row.rank}</span>
                   <TVAvatar
                     name={row.manager}
                     firstName={row.prenom}
                     lastName={row.nom}
                     photoUrl={row.photo_url}
-                    className="h-14 w-14 text-base"
+                    className="h-14 w-14 text-base 2xl:h-16 2xl:w-16"
                   />
                   <span className="min-w-0 flex-1 truncate font-bold text-white">{row.manager}</span>
                   <div className="shrink-0 text-right">
-                    <p className="text-lg font-black text-emerald-200">{formatTaux(row.score ?? row.taux)}</p>
+                    <p className="text-base font-black text-emerald-200 2xl:text-lg">{formatTaux(row.score ?? row.taux)}</p>
                     <p className="text-xs text-slate-400">{formatCurrency(row.commission)}</p>
                   </div>
                 </article>
@@ -1157,48 +1163,50 @@ function TVPortfolioSlide({ variant }) {
         eyebrow=""
         title={isResponsibleRanking ? 'Classement des responsables' : 'Classement des clients'}
         />
-      <div className={`mx-auto ${isResponsibleRanking ? 'max-w-5xl' : 'max-w-7xl'}`}>
+      <div className={`mx-auto ${isResponsibleRanking ? 'max-w-7xl' : 'max-w-[2400px]'}`}>
         {isResponsibleRanking ? (
         <section className="rounded-3xl border border-amber-300/20 bg-slate-900/70 p-4 shadow-xl md:p-5">
-          <div className="mb-4 flex flex-wrap items-end justify-between gap-2 border-b border-white/10 pb-3">
+          <div className="mb-3 flex flex-wrap items-end justify-between gap-2 border-b border-white/10 pb-2">
             <div>
               <p className="text-xs font-bold uppercase tracking-[0.25em] text-amber-300">Classement par taux</p>
             </div>
             <p className="text-xs text-slate-400">Import : {importedAt(data.responsables?.import)}</p>
           </div>
           {responsibleRows.length ? (
-            <div className="max-h-[70vh] space-y-3 overflow-y-auto pr-1">
+            <div className="space-y-2 pr-1">
               {responsibleRows.map((row, index) => {
                 const name = row.nom_affichage || `${row.prenom || ''} ${row.nom || ''}`.trim();
                 const progress = Math.min(100, Math.max(0, Number(row.taux || 0)));
                 return (
-                  <article key={row.id} className="rounded-2xl border border-white/10 bg-black/20 p-3">
-                    <div className="flex items-center gap-3">
-                      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-amber-300/15 text-sm font-black text-amber-200">#{index + 1}</span>
-                      <TVAvatar
-                        name={name}
-                        firstName={row.prenom}
-                        lastName={row.nom}
-                        photoUrl={row.photo_url}
-                        className="h-16 w-16 text-lg"
-                      />
-                      <span className="min-w-0 flex-1 truncate font-bold text-white">{name}</span>
-                      <span className="text-xl font-black text-amber-200">{formatTaux(row.taux)}</span>
-                    </div>
-                    <div className="mt-3 grid grid-cols-3 gap-2 text-right">
-                      {[
-                        { label: 'Encaissement', value: row.encaissement },
-                        { label: 'Commission', value: row.commission },
-                        { label: 'Objectif', value: row.objectif },
-                      ].map((metric) => (
-                        <div key={metric.label} className="min-w-0">
-                          <p className="truncate text-[10px] uppercase tracking-wide text-slate-400">{metric.label}</p>
-                          <p className="truncate text-xs font-bold text-slate-100">{formatCurrencyPrecise(metric.value)}</p>
-                        </div>
-                      ))}
-                    </div>
-                    <div className="mt-3 h-2 overflow-hidden rounded-full bg-white/10">
-                      <div className="h-full rounded-full bg-gradient-to-r from-amber-300 to-emerald-400" style={{ width: `${progress}%` }} />
+                  <article key={row.id} className="flex items-center gap-4 rounded-2xl border border-white/10 bg-black/20 p-3 md:gap-5 md:p-4">
+                    <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-amber-300/15 text-base font-black text-amber-200 md:h-14 md:w-14 md:text-lg">#{index + 1}</span>
+                    <TVAvatar
+                      name={name}
+                      firstName={row.prenom}
+                      lastName={row.nom}
+                      photoUrl={row.photo_url}
+                      className="h-20 w-20 text-2xl md:h-24 md:w-24 md:text-3xl 2xl:h-28 2xl:w-28"
+                    />
+                    <div className="min-w-0 flex-1">
+                      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                        <span className="truncate text-lg font-bold text-white md:text-2xl">{name}</span>
+                        <span className="text-2xl font-black text-amber-200 md:text-3xl">{formatTaux(row.taux)}</span>
+                      </div>
+                      <div className="grid grid-cols-3 gap-3 text-left md:gap-5">
+                        {[
+                          { label: 'Encaissement', value: row.encaissement },
+                          { label: 'Commission', value: row.commission },
+                          { label: 'Objectif', value: row.objectif },
+                        ].map((metric) => (
+                          <div key={metric.label} className="min-w-0">
+                            <p className="truncate text-[10px] uppercase tracking-wide text-slate-400 md:text-xs">{metric.label}</p>
+                            <p className="truncate text-sm font-bold text-slate-100 md:text-base">{formatCurrencyPrecise(metric.value)}</p>
+                          </div>
+                        ))}
+                      </div>
+                      <div className="mt-2 h-2 overflow-hidden rounded-full bg-white/10 md:h-2.5">
+                        <div className="h-full rounded-full bg-gradient-to-r from-amber-300 to-emerald-400" style={{ width: `${progress}%` }} />
+                      </div>
                     </div>
                   </article>
                 );
@@ -1218,14 +1226,14 @@ function TVPortfolioSlide({ variant }) {
             <p className="text-xs text-slate-400">Import : {importedAt(data.clients?.import)}</p>
           </div>
           {clientRows.length ? (
-            <div className="grid max-h-[70vh] gap-2 overflow-y-auto pr-1 md:grid-cols-2 xl:grid-cols-3">
+            <div className="grid gap-2 pr-1 sm:grid-cols-2 xl:grid-cols-4">
               {clientRows.map((row, index) => (
-                <article key={row.id} className="flex min-w-0 items-center gap-2 rounded-xl border border-white/10 bg-black/20 px-2 py-2">
-                  <span className="w-7 shrink-0 text-center text-xs font-black text-cyan-200">#{index + 1}</span>
-                  <TVAvatar name={row.nom} photoUrl={row.photo_url} className="h-12 w-12 text-sm" />
+                <article key={row.id} className="flex min-w-0 items-center gap-2 rounded-xl border border-white/10 bg-black/20 px-2 py-1.5 2xl:gap-3 2xl:px-3">
+                  <span className="w-7 shrink-0 text-center text-xs font-black text-cyan-200 2xl:text-sm">#{index + 1}</span>
+                  <TVAvatar name={row.nom} photoUrl={row.photo_url} className="h-11 w-11 text-sm 2xl:h-14 2xl:w-14" />
                   <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm font-bold text-white">{row.nom}</p>
-                    <div className="mt-0.5 flex flex-wrap justify-between gap-x-2 text-[10px]">
+                    <p className="truncate text-sm font-bold text-white 2xl:text-base">{row.nom}</p>
+                    <div className="mt-0.5 flex flex-wrap justify-between gap-x-2 text-[10px] 2xl:text-xs">
                       <span className="text-slate-300">{formatCurrencyPrecise(row.encaissement)}</span>
                       <span className="text-emerald-300">{formatCurrencyPrecise(row.commission_srm)}</span>
                     </div>

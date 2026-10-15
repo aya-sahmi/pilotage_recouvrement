@@ -1,1 +1,28 @@
 @import 'tailwindcss';
+
+@media (min-width: 3000px) and (min-height: 1600px) {
+  html.tv-mode-4k {
+    font-size: 20px;
+  }
+
+  .tv-mode .mx-auto {
+    max-width: min(100%, 120rem);
+  }
+
+  .tv-mode [class~="text-[10px]"],
+  .tv-mode [class~="text-[11px]"] {
+    font-size: 0.75rem;
+  }
+
+  .tv-mode [class~="max-h-[52vh]"] {
+    max-height: 62vh;
+  }
+
+  .tv-mode [class~="max-h-[28vh]"] {
+    max-height: 36vh;
+  }
+
+  .tv-mode [class~="min-w-[1500px]"] {
+    min-width: 100%;
+  }
+}
