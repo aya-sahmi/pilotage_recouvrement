@@ -79,6 +79,8 @@ const navigation = [
   { label: 'Imports', to: '/imports', icon: Upload },
   { label: 'Historique', to: '/historique', icon: BarChart3 },
   { label: 'Gestionnaires', to: '/gestionnaires', icon: Users },
+  { label: 'Responsables', to: '/responsables', icon: Users },
+  { label: 'Clients', to: '/clients', icon: Building2 },
   { label: 'Mode TV', to: '/tv', icon: MonitorPlay },
 ];
 
@@ -233,7 +235,9 @@ function AppShell() {
             <Route path="/controle" element={<ControlePage />} />
             <Route path="/imports" element={<ImportsPage />} />
             <Route path="/historique" element={<HistoriquePage />} />
-            <Route path="/gestionnaires" element={<GestionnairesPage />} />
+            <Route path="/gestionnaires" element={<GestionnairesPage key="gestionnaires" tab="gestionnaires" />} />
+            <Route path="/responsables" element={<GestionnairesPage key="responsables" tab="responsables" />} />
+            <Route path="/clients" element={<GestionnairesPage key="clients" tab="clients" />} />
             <Route path="/tv" element={<TVPage />} />
           </Routes>
         </main>
@@ -615,7 +619,7 @@ function ImportsPage() {
         </div>
         <div className="rounded-3xl border border-white/10 bg-white/5 p-5">
           <h3 className="mb-2 text-xl font-bold text-white">Type 3 : Classement des responsables</h3>
-          <p className="mb-4 text-sm text-slate-400">Colonnes : Nom et Prenom, Encaissement, Commission, Objectif. La ligne Total est ignorée. Photo URL est facultative ; une photo déjà enregistrée est conservée si la cellule est vide.</p>
+          <p className="mb-4 text-sm text-slate-400">Colonnes : Nom et Prenom, Encaissement, Commission, Objectif. Le taux est calculé automatiquement. La ligne Total est ignorée. Photo URL est facultative ; une photo déjà enregistrée est conservée si la cellule est vide.</p>
           <input type="file" accept=".xlsx,.xls" onChange={(e) => setFileMap((prev) => ({ ...prev, responsables: e.target.files?.[0] || null }))} className="mb-4 block w-full text-sm text-slate-300 file:mr-4 file:rounded-2xl file:border-0 file:bg-amber-400 file:px-4 file:py-3 file:font-semibold file:text-slate-950" />
           <button onClick={() => submitImport('responsables')} className="rounded-2xl bg-gradient-to-r from-amber-400 to-orange-500 px-4 py-3 font-bold text-slate-950">Importer le classement responsables</button>
         </div>
@@ -805,33 +809,223 @@ function HistoriquePage() {
   );
 }
 
-function GestionnairesPage() {
+const managementTabs = {
+  gestionnaires: {
+    label: 'Gestionnaires',
+    endpoint: '/gestionnaires',
+    fields: [
+      { key: 'prenom', label: 'Prénom' },
+      { key: 'nom', label: 'Nom', required: true },
+      { key: 'extension_3cx', label: 'Extension 3CX' },
+      { key: 'photo_url', label: 'Photo', type: 'image' },
+    ],
+    title: (item) => `${item.prenom || ''} ${item.nom || ''}`.trim(),
+    subtitle: (item) => `3CX ${item.extension_3cx || '—'}`,
+  },
+  responsables: {
+    label: 'Responsables',
+    endpoint: '/responsables',
+    fields: [
+      { key: 'prenom', label: 'Prénom' },
+      { key: 'nom', label: 'Nom', required: true },
+      { key: 'nom_affichage', label: "Nom d'affichage" },
+      { key: 'photo_url', label: 'Photo', type: 'image' },
+    ],
+    title: (item) => item.nom_affichage || `${item.prenom || ''} ${item.nom || ''}`.trim(),
+    subtitle: () => '',
+  },
+  clients: {
+    label: 'Clients',
+    endpoint: '/clients',
+    fields: [
+      { key: 'nom', label: 'Nom', required: true },
+      { key: 'photo_url', label: 'Logo / photo', type: 'image' },
+    ],
+    title: (item) => item.nom,
+    subtitle: () => '',
+  },
+};
+
+// Redimensionne l'image choisie (max 400px) et la convertit en data URL JPEG.
+function readImageAsDataUrl(file, maxSize = 400) {
+  return new Promise((resolve, reject) => {
+    const objectUrl = URL.createObjectURL(file);
+    const image = new Image();
+    image.onload = () => {
+      const ratio = Math.min(1, maxSize / Math.max(image.width, image.height));
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.round(image.width * ratio);
+      canvas.height = Math.round(image.height * ratio);
+      canvas.getContext('2d').drawImage(image, 0, 0, canvas.width, canvas.height);
+      URL.revokeObjectURL(objectUrl);
+      resolve(canvas.toDataURL('image/jpeg', 0.85));
+    };
+    image.onerror = () => {
+      URL.revokeObjectURL(objectUrl);
+      reject(new Error("Image illisible."));
+    };
+    image.src = objectUrl;
+  });
+}
+
+function GestionnairesPage({ tab }) {
   const [items, setItems] = useState([]);
+  const [form, setForm] = useState(null);
+  const [error, setError] = useState('');
+  const [reloadKey, setReloadKey] = useState(0);
+  const config = managementTabs[tab];
 
   useEffect(() => {
-    apiFetch('/gestionnaires')
-      .then((payload) => setItems(payload.rows || payload))
-      .catch(() => setItems([]));
-  }, []);
+    let cancelled = false;
+    apiFetch(config.endpoint)
+      .then((payload) => { if (!cancelled) setItems(payload.rows || payload || []); })
+      .catch((err) => { if (!cancelled) { setItems([]); setError(err.message); } });
+    return () => { cancelled = true; };
+  }, [config.endpoint, reloadKey]);
+
+  async function removeItem(item) {
+    if (!window.confirm(`Supprimer définitivement « ${config.title(item)} » ?`)) return;
+    try {
+      await apiFetch(`${config.endpoint}/${item.id}`, { method: 'DELETE' });
+      setError('');
+      setReloadKey((key) => key + 1);
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+
+  function openForm(item) {
+    const values = {};
+    config.fields.forEach(({ key }) => { values[key] = item?.[key] ?? ''; });
+    setForm({ id: item?.id ?? null, values });
+    setError('');
+  }
+
+  async function save(event) {
+    event.preventDefault();
+    try {
+      await apiFetch(form.id ? `${config.endpoint}/${form.id}` : config.endpoint, {
+        method: form.id ? 'PUT' : 'POST',
+        body: JSON.stringify(form.values),
+      });
+      setForm(null);
+      setError('');
+      setReloadKey((key) => key + 1);
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+
+  async function toggleActive(item) {
+    try {
+      await apiFetch(`${config.endpoint}/${item.id}`, {
+        method: 'PUT',
+        body: JSON.stringify({ actif: item.actif === false }),
+      });
+      setReloadKey((key) => key + 1);
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+
+  const inputClass = 'w-full rounded-xl border border-white/10 bg-slate-900 px-3 py-2 text-sm text-white';
 
   return (
     <>
-      <SectionTitle title="Gestionnaires" subtitle="Liste, statut et extensions 3CX" />
+      <SectionTitle title={config.label} subtitle="Ajouter, modifier, désactiver ou supprimer" />
+      <div className="mb-6 flex flex-wrap items-center gap-2">
+        <button type="button" onClick={() => openForm(null)} className="ml-auto rounded-2xl bg-cyan-500 px-4 py-2 text-sm font-bold text-slate-950">
+          + Ajouter
+        </button>
+      </div>
+
+      {error ? <div className="mb-4 rounded-2xl bg-rose-500/10 p-3 text-sm text-rose-300">{error}</div> : null}
+
+      {form ? (
+        <form onSubmit={save} className="mb-6 grid gap-3 rounded-3xl border border-white/10 bg-white/5 p-4 md:grid-cols-2">
+          {config.fields.map(({ key, label, required, type }) => (
+            type === 'image' ? (
+              <div key={key} className="text-xs text-slate-300">
+                {label}
+                <div className="mt-1 flex items-center gap-3">
+                  {form.values[key] ? (
+                    <img src={resolvePhotoUrl(form.values[key])} alt="Aperçu" className="h-20 w-20 rounded-2xl object-cover" />
+                  ) : (
+                    <div className="flex h-20 w-20 items-center justify-center rounded-2xl bg-slate-900 text-slate-500">—</div>
+                  )}
+                  <div className="space-y-2">
+                    <input
+                      type="file"
+                      accept="image/*"
+                      className="block text-xs text-slate-300 file:mr-3 file:rounded-xl file:border-0 file:bg-white/10 file:px-3 file:py-2 file:text-xs file:text-white"
+                      onChange={async (event) => {
+                        const file = event.target.files?.[0];
+                        if (!file) return;
+                        try {
+                          const dataUrl = await readImageAsDataUrl(file);
+                          setForm((current) => ({ ...current, values: { ...current.values, [key]: dataUrl } }));
+                          setError('');
+                        } catch (err) {
+                          setError(err.message);
+                        }
+                      }}
+                    />
+                    {form.values[key] ? (
+                      <button
+                        type="button"
+                        onClick={() => setForm({ ...form, values: { ...form.values, [key]: '' } })}
+                        className="text-xs text-rose-300 hover:underline"
+                      >
+                        Retirer la photo
+                      </button>
+                    ) : null}
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <label key={key} className="text-xs text-slate-300">
+                {label}
+                <input
+                  className={inputClass}
+                  required={required}
+                  value={form.values[key]}
+                  onChange={(event) => setForm({ ...form, values: { ...form.values, [key]: event.target.value } })}
+                />
+              </label>
+            )
+          ))}
+          <div className="flex gap-2 md:col-span-2">
+            <button type="submit" className="rounded-xl bg-cyan-500 px-4 py-2 text-sm font-bold text-slate-950">
+              {form.id ? 'Enregistrer' : 'Créer'}
+            </button>
+            <button type="button" onClick={() => setForm(null)} className="rounded-xl px-4 py-2 text-sm text-slate-300 hover:bg-white/5">
+              Annuler
+            </button>
+          </div>
+        </form>
+      ) : null}
+
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
         {(items || []).map((item) => (
-          <div key={item.id || item.gestionnaire_id} className="rounded-3xl border border-white/10 bg-white/5 p-4">
+          <div key={item.id} className={`rounded-3xl border border-white/10 bg-white/5 p-4 ${item.actif === false ? 'opacity-60' : ''}`}>
             <div className="mb-4 flex items-center gap-3">
-              <img src={item.photo_url || 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e'} alt={`${item.prenom || ''} ${item.nom || ''}`} className="h-16 w-16 rounded-2xl object-cover" />
+              <img src={resolvePhotoUrl(item.photo_url) || 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e'} alt={config.title(item)} className="h-16 w-16 rounded-2xl object-cover" />
               <div>
-                <div className="font-bold text-white">{item.prenom || ''} {item.nom || ''}</div>
-                <div className="text-xs uppercase tracking-[0.2em] text-slate-400">3CX {item.extension_3cx || '—'}</div>
+                <div className="font-bold text-white">{config.title(item)}</div>
+                <div className="text-xs uppercase tracking-[0.2em] text-slate-400">{config.subtitle(item)}</div>
               </div>
             </div>
-            <div className="flex items-center justify-between text-sm text-slate-200">
-              <span>Statut</span>
+            <div className="flex items-center justify-between gap-2 text-sm text-slate-200">
               <span className={`rounded-full px-2 py-1 text-[10px] font-bold uppercase ${item.actif === false ? 'bg-rose-500/10 text-rose-300' : 'bg-emerald-500/10 text-emerald-300'}`}>
                 {item.actif === false ? 'Inactif' : 'Actif'}
               </span>
+              <div className="flex gap-2">
+                <button type="button" onClick={() => openForm(item)} className="rounded-xl bg-white/10 px-3 py-1 text-xs hover:bg-white/20">Modifier</button>
+                <button type="button" onClick={() => toggleActive(item)} className="rounded-xl bg-white/10 px-3 py-1 text-xs hover:bg-white/20">
+                  {item.actif === false ? 'Activer' : 'Désactiver'}
+                </button>
+                <button type="button" onClick={() => removeItem(item)} className="rounded-xl bg-rose-500/20 px-3 py-1 text-xs text-rose-200 hover:bg-rose-500/30">Supprimer</button>
+              </div>
             </div>
           </div>
         ))}
@@ -846,7 +1040,10 @@ const tvScreens = [
   { id: 'last-three', label: 'Les trois derniers' },
   { id: 'performance', label: 'Performance' },
   { id: 'objectives', label: 'Objectifs' },
-  { id: 'full-ranking', label: 'Classement complet gestionnaires' },
+  { id: 'full-ranking-1', label: 'Classement gestionnaires 1/4', page: 0 },
+  { id: 'full-ranking-2', label: 'Classement gestionnaires 2/4', page: 1 },
+  { id: 'full-ranking-3', label: 'Classement gestionnaires 3/4', page: 2 },
+  { id: 'full-ranking-4', label: 'Classement gestionnaires 4/4', page: 3 },
   { id: 'portfolio-responsables', label: 'Classement responsables' },
   { id: 'portfolio-clients', label: 'Classement clients' },
   { id: 'calls', label: 'Activité 3CX' },
@@ -900,7 +1097,7 @@ function TVAvatar({ name, firstName, lastName, photoUrl, className = 'h-20 w-20'
   );
 }
 
-function TVRankingSlide({ variant }) {
+function TVRankingSlide({ variant, page = 0 }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
 
@@ -921,38 +1118,32 @@ function TVRankingSlide({ variant }) {
   }
 
   if (variant === 'full-ranking') {
-    const columnSize = Math.ceil(data.rows.length / 4);
-    const columns = [
-      data.rows.slice(0, columnSize),
-      data.rows.slice(columnSize, columnSize * 2),
-      data.rows.slice(columnSize * 2, columnSize * 3),
-      data.rows.slice(columnSize * 3),
-    ];
+    const rows = data.rows.slice(page * 8, page * 8 + 8);
+    if (!rows.length) {
+      return <EmptyState title="Aucun gestionnaire" description="Aucun gestionnaire dans cette tranche du classement." />;
+    }
 
     return (
-      <section className="h-full py-2">
-        <TVSlideHeading title="Tous les gestionnaires" />
-        <div className="mx-auto grid max-w-[2400px] gap-3 sm:grid-cols-2 xl:grid-cols-4">
-          {columns.map((rows, columnIndex) => (
-            <div key={columnIndex} className="space-y-2">
-              {rows.map((row) => (
-                <article key={row.id || row.manager} className="flex min-h-16 items-center gap-3 rounded-2xl border border-white/10 bg-slate-900/75 px-3 py-2">
-                  <span className="w-9 shrink-0 text-center text-base font-black text-cyan-200">#{row.rank}</span>
-                  <TVAvatar
-                    name={row.manager}
-                    firstName={row.prenom}
-                    lastName={row.nom}
-                    photoUrl={row.photo_url}
-                    className="h-14 w-14 text-base 2xl:h-16 2xl:w-16"
-                  />
-                  <span className="min-w-0 flex-1 truncate font-bold text-white">{row.manager}</span>
-                  <div className="shrink-0 text-right">
-                    <p className="text-base font-black text-emerald-200 2xl:text-lg">{formatTaux(row.score ?? row.taux)}</p>
-                    <p className="text-xs text-slate-400">{formatCurrency(row.commission)}</p>
-                  </div>
-                </article>
-              ))}
-            </div>
+      <section className="flex h-full flex-col py-2">
+        <TVSlideHeading
+          eyebrow={`Classement ${page + 1}/4`}
+          title={`Gestionnaires #${page * 8 + 1} à #${page * 8 + rows.length}`}
+        />
+        <div className="mx-auto grid w-full max-w-[2400px] flex-1 grid-cols-4 content-center gap-4">
+          {rows.map((row) => (
+            <article key={row.id || row.manager} className="flex flex-col items-center gap-3 rounded-3xl border border-white/10 bg-slate-900/75 px-3 py-5 text-center">
+              <span className="rounded-full bg-cyan-500/20 px-4 py-1 text-xl font-black text-cyan-200">#{row.rank}</span>
+              <TVAvatar
+                name={row.manager}
+                firstName={row.prenom}
+                lastName={row.nom}
+                photoUrl={row.photo_url}
+                className="h-36 w-36 text-4xl 2xl:h-52 2xl:w-52 2xl:text-6xl"
+              />
+              <p className="w-full truncate text-xl font-bold text-white 2xl:text-3xl">{row.manager}</p>
+              <p className="text-2xl font-black text-emerald-200 2xl:text-4xl">{formatTaux(row.score ?? row.taux)}</p>
+              <p className="text-sm text-slate-400 2xl:text-lg">{formatCurrency(row.commission)}</p>
+            </article>
           ))}
         </div>
       </section>
@@ -1643,8 +1834,14 @@ function TVSlideContent({ screenId, dailyCallsProps }) {
       return <TVPerformanceSlide />;
     case 'objectives':
       return <TVPerformanceSlide objectives />;
-    case 'full-ranking':
-      return <TVRankingSlide variant="full-ranking" />;
+    case 'full-ranking-1':
+      return <TVRankingSlide variant="full-ranking" page={0} />;
+    case 'full-ranking-2':
+      return <TVRankingSlide variant="full-ranking" page={1} />;
+    case 'full-ranking-3':
+      return <TVRankingSlide variant="full-ranking" page={2} />;
+    case 'full-ranking-4':
+      return <TVRankingSlide variant="full-ranking" page={3} />;
     case 'portfolio-responsables':
       return <TVPortfolioSlide variant="responsables" />;
     case 'portfolio-clients':

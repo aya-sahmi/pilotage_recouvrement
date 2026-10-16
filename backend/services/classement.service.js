@@ -106,7 +106,7 @@ async function getLatestResponsibleRanking() {
             cr.encaissement, cr.commission, cr.objectif
      FROM classement_responsables cr
      JOIN responsables r ON r.id = cr.responsable_id
-     WHERE cr.import_id = $1
+     WHERE cr.import_id = $1 AND COALESCE(r.actif, TRUE)
      ORDER BY CASE WHEN cr.objectif > 0 THEN cr.commission / cr.objectif ELSE 0 END DESC,
               r.nom_affichage ASC`,
     [latestImport.id]
@@ -137,7 +137,7 @@ async function getLatestClientRanking() {
     `SELECT c.id, c.nom, c.photo_url, cc.encaissement, cc.commission_srm
      FROM classement_clients cc
      JOIN clients c ON c.id = cc.client_id
-     WHERE cc.import_id = $1
+     WHERE cc.import_id = $1 AND COALESCE(c.actif, TRUE)
      ORDER BY cc.encaissement DESC, c.nom ASC`,
     [latestImport.id]
   );

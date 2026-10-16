@@ -4,7 +4,7 @@ const connectionString = process.env.DATABASE_URL;
 const pool = connectionString
   ? new Pool({
       connectionString,
-      ssl: connectionString.includes('neon.tech') ? { rejectUnauthorized: false } : false,
+      ssl: /neon\.tech|supabase\.(co|com)/.test(connectionString) ? { rejectUnauthorized: false } : false,
     })
   : null;
 
