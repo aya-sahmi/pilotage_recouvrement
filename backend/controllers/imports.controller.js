@@ -307,16 +307,16 @@ async function importClientsRanking(req, res, next) {
 async function getImports(req, res, next) {
   try {
     const { rows } = await query(`
-      SELECT type_import, nom_fichier, date_import, nombre_lignes,
+      SELECT id, 'standard' AS source, type_import, nom_fichier, date_import, nombre_lignes,
              nombre_lignes_importees, nombre_lignes_erreur, statut
       FROM imports
       UNION ALL
-      SELECT 'CLASSEMENT RESPONSABLES' AS type_import, nom_fichier, date_import,
+      SELECT id, 'responsables' AS source, 'CLASSEMENT RESPONSABLES' AS type_import, nom_fichier, date_import,
              nombre_lignes, nombre_lignes AS nombre_lignes_importees,
              0 AS nombre_lignes_erreur, 'TERMINE' AS statut
       FROM classement_responsables_imports
       UNION ALL
-      SELECT 'CLASSEMENT CLIENTS' AS type_import, nom_fichier, date_import,
+      SELECT id, 'clients' AS source, 'CLASSEMENT CLIENTS' AS type_import, nom_fichier, date_import,
              nombre_lignes, nombre_lignes AS nombre_lignes_importees,
              0 AS nombre_lignes_erreur, 'TERMINE' AS statut
       FROM classement_clients_imports
@@ -329,10 +329,55 @@ async function getImports(req, res, next) {
   }
 }
 
+// Tables enfants à vider avant de supprimer l'import parent.
+const IMPORT_SOURCES = {
+  standard: { table: 'imports', children: ['performances', 'dossiers'] },
+  responsables: { table: 'classement_responsables_imports', children: ['classement_responsables'] },
+  clients: { table: 'classement_clients_imports', children: ['classement_clients'] },
+};
+
+async function deleteImport(req, res, next) {
+  const source = IMPORT_SOURCES[req.params.source];
+  const id = Number(req.params.id);
+  if (!source || !Number.isInteger(id)) {
+    return res.status(400).json({ success: false, message: 'Import invalide.' });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    if (source.children.includes('dossiers')) {
+      await client.query(
+        'UPDATE appels_3cx SET dossier_id = NULL WHERE dossier_id IN (SELECT id FROM dossiers WHERE import_id = $1)',
+        [id]
+      );
+    }
+    for (const child of source.children) {
+      await client.query(`DELETE FROM ${child} WHERE import_id = $1`, [id]);
+    }
+    const result = await client.query(`DELETE FROM ${source.table} WHERE id = $1`, [id]);
+    if (!result.rowCount) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ success: false, message: 'Import introuvable.' });
+    }
+    await client.query('COMMIT');
+    res.json({ success: true, data: { id }, message: 'Import supprimé.' });
+  } catch (error) {
+    await client.query('ROLLBACK').catch(() => {});
+    if (error.code === '23503') {
+      return res.status(409).json({ success: false, message: 'Suppression impossible : des données dépendent encore de cet import.' });
+    }
+    next(error);
+  } finally {
+    client.release();
+  }
+}
+
 module.exports = {
   importPerformance,
   importPortefeuille,
   importResponsablesRanking,
   importClientsRanking,
   getImports,
+  deleteImport,
 };

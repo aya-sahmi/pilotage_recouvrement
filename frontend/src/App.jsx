@@ -603,6 +603,17 @@ function ImportsPage() {
     }
   };
 
+  const deleteImport = async (row) => {
+    if (!window.confirm(`Supprimer l'import « ${row.nom_fichier} » et toutes les données associées ?`)) return;
+    try {
+      await apiFetch(`/imports/${row.source}/${row.id}`, { method: 'DELETE' });
+      const updated = await apiFetch('/imports');
+      setResults(updated.rows || updated);
+    } catch (error) {
+      alert(error.message);
+    }
+  };
+
   return (
     <>
       <SectionTitle title="Imports" subtitle="Import des fichiers Excel" />
@@ -632,15 +643,16 @@ function ImportsPage() {
       </div>
 
       <div className="mt-8 rounded-3xl border border-white/10 bg-white/5 p-4">
-        <div className="mb-4 grid grid-cols-[1.3fr_0.8fr_0.6fr_0.6fr_0.6fr] gap-3 px-2 text-[10px] uppercase tracking-[0.28em] text-slate-400">
+        <div className="mb-4 grid grid-cols-[1.3fr_0.8fr_0.6fr_0.6fr_0.6fr_0.5fr] gap-3 px-2 text-[10px] uppercase tracking-[0.28em] text-slate-400">
           <span>Fichier</span>
           <span>Date</span>
           <span>Lignes</span>
           <span>Importées</span>
           <span>Statut</span>
+          <span />
         </div>
         {(results || []).map((row) => (
-          <div key={`${row.nom_fichier}-${row.date_import}`} className="mb-3 grid grid-cols-[1.3fr_0.8fr_0.6fr_0.6fr_0.6fr] items-center gap-3 rounded-2xl border border-white/10 bg-slate-900/40 px-3 py-3 text-white">
+          <div key={`${row.source}-${row.id}`} className="mb-3 grid grid-cols-[1.3fr_0.8fr_0.6fr_0.6fr_0.6fr_0.5fr] items-center gap-3 rounded-2xl border border-white/10 bg-slate-900/40 px-3 py-3 text-white">
             <span>
               <span className="mr-2 text-xs font-bold uppercase text-cyan-300">{row.type_import || 'Import'}</span>
               {row.nom_fichier}
@@ -649,7 +661,8 @@ function ImportsPage() {
             <span>{row.nombre_lignes || row.lignes || 0}</span>
             <span>{row.lignes_importees || row.importees || 0}</span>
             <span className={`inline-flex w-fit rounded-full px-2 py-1 text-xs font-bold ${getStatusClass(row.statut)}`}>{row.statut || 'OK'}</span>
-          </div>
+                        <button type="button" onClick={() => deleteImport(row)} className="rounded-xl bg-rose-500/20 px-3 py-1 text-xs text-rose-200 hover:bg-rose-500/30">Supprimer</button>
+                      </div>
         ))}
       </div>
     </>

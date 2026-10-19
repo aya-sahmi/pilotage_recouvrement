@@ -6,6 +6,7 @@ const {
   importResponsablesRanking,
   importClientsRanking,
   getImports,
+  deleteImport,
 } = require('../controllers/imports.controller');
 
 const router = express.Router();
@@ -20,6 +21,7 @@ const upload = multer({
 });
 
 router.get('/', getImports);
+router.delete('/:source/:id', deleteImport);
 router.post('/performance', upload.single('file'), importPerformance);
 router.post('/portefeuille', upload.single('file'), importPortefeuille);
 router.post('/responsables', upload.single('file'), importResponsablesRanking);
