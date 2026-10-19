@@ -1052,7 +1052,6 @@ const tvScreens = [
   { id: 'podium', label: 'Le podium' },
   { id: 'last-three', label: 'Les trois derniers' },
   { id: 'performance', label: 'Performance' },
-  { id: 'objectives', label: 'Objectifs' },
   { id: 'full-ranking-1', label: 'Classement gestionnaires 1/4', page: 0 },
   { id: 'full-ranking-2', label: 'Classement gestionnaires 2/4', page: 1 },
   { id: 'full-ranking-3', label: 'Classement gestionnaires 3/4', page: 2 },
@@ -1254,7 +1253,7 @@ function TVRankingSlide({ variant, page = 0 }) {
   );
 }
 
-function TVPerformanceSlide({ objectives = false }) {
+function TVPerformanceSlide() {
   const [data, setData] = useState(null);
 
   useEffect(() => {
@@ -1269,13 +1268,13 @@ function TVPerformanceSlide({ objectives = false }) {
 
   if (!data) return <EmptyState title="Données indisponibles" description="Aucune donnée de performance n’est disponible pour cet écran." />;
 
-  const rows = (data.ranking || []).slice(0, objectives ? 6 : 8);
+  const rows = (data.ranking || []).slice(0, 8);
   return (
     <section className="py-5">
       <TVSlideHeading
-        eyebrow={objectives ? 'Suivi des objectifs' : 'Résultats de l’équipe'}
-        title={objectives ? 'Progression des objectifs' : 'Performance'}
-        subtitle={objectives ? 'Avancement de la commission par rapport aux objectifs' : 'Les meilleurs taux de réalisation'}
+        eyebrow="Résultats de l’équipe"
+        title="Performance"
+        subtitle="Les meilleurs taux de réalisation"
       />
       <div className="mx-auto mb-7 grid max-w-5xl gap-4 sm:grid-cols-3">
         {[
@@ -1845,8 +1844,6 @@ function TVSlideContent({ screenId, dailyCallsProps }) {
       return <TVRankingSlide variant="last-three" />;
     case 'performance':
       return <TVPerformanceSlide />;
-    case 'objectives':
-      return <TVPerformanceSlide objectives />;
     case 'full-ranking-1':
       return <TVRankingSlide variant="full-ranking" page={0} />;
     case 'full-ranking-2':
