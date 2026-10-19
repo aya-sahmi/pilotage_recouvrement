@@ -307,8 +307,8 @@ async function importClientsRanking(req, res, next) {
 async function getImports(req, res, next) {
   try {
     const { rows } = await query(`
-      SELECT id, 'standard' AS source, type_import, nom_fichier, date_import, nombre_lignes,
-             nombre_lignes_importees, nombre_lignes_erreur, statut
+      SELECT id, 'standard' AS source, type_import::text AS type_import, nom_fichier, date_import, nombre_lignes,
+             nombre_lignes_importees, nombre_lignes_erreur, statut::text AS statut
       FROM imports
       UNION ALL
       SELECT id, 'responsables' AS source, 'CLASSEMENT RESPONSABLES' AS type_import, nom_fichier, date_import,
