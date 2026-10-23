@@ -572,6 +572,7 @@ function ImportsPage() {
     portefeuille: null,
     responsables: null,
     clients: null,
+    encaissements: null,
   });
 
   useEffect(() => {
@@ -639,6 +640,12 @@ function ImportsPage() {
           <p className="mb-4 text-sm text-slate-400">Colonnes : Nom client, Encaissement, Commission SRM. La ligne Total est ignorée. Photo URL est facultative ; une photo déjà enregistrée est conservée si la cellule est vide.</p>
           <input type="file" accept=".xlsx,.xls" onChange={(e) => setFileMap((prev) => ({ ...prev, clients: e.target.files?.[0] || null }))} className="mb-4 block w-full text-sm text-slate-300 file:mr-4 file:rounded-2xl file:border-0 file:bg-emerald-400 file:px-4 file:py-3 file:font-semibold file:text-slate-950" />
           <button onClick={() => submitImport('clients')} className="rounded-2xl bg-gradient-to-r from-emerald-400 to-teal-500 px-4 py-3 font-bold text-slate-950">Importer le classement clients</button>
+        </div>
+        <div className="rounded-3xl border border-white/10 bg-white/5 p-5 xl:col-span-2">
+          <h3 className="mb-2 text-xl font-bold text-white">Type 5 : Encaissements globaux (1er janvier → aujourd’hui)</h3>
+          <p className="mb-4 text-sm text-slate-400">Colonnes : ID Interne, ID Externe, Client, Débiteur, Montant encaisse, Taux, Commission, Mode de règlement, Statut, Gestionnaire, Date, Responsable. Chaque import remplace le précédent. Alimente les classements 3 mois, 6 mois et 1 an du dashboard.</p>
+          <input type="file" accept=".xlsx" onChange={(e) => setFileMap((prev) => ({ ...prev, encaissements: e.target.files?.[0] || null }))} className="mb-4 block w-full text-sm text-slate-300 file:mr-4 file:rounded-2xl file:border-0 file:bg-fuchsia-400 file:px-4 file:py-3 file:font-semibold file:text-slate-950" />
+          <button onClick={() => submitImport('encaissements')} className="rounded-2xl bg-gradient-to-r from-fuchsia-400 to-pink-500 px-4 py-3 font-bold text-slate-950">Importer les encaissements</button>
         </div>
       </div>
 
@@ -1058,10 +1065,88 @@ const tvScreens = [
   { id: 'full-ranking-4', label: 'Classement gestionnaires 4/4', page: 3 },
   { id: 'portfolio-responsables', label: 'Classement responsables' },
   { id: 'portfolio-clients', label: 'Classement clients' },
+  { id: 'encaissement-current', label: 'Encaissements • Mois actuel', period: 'current' },
+  { id: 'encaissement-3m', label: 'Encaissements • 3 mois', period: '3m' },
+  { id: 'encaissement-6m', label: 'Encaissements • 6 mois', period: '6m' },
+  { id: 'encaissement-1y', label: 'Encaissements • 1 an', period: '1y' },
   { id: 'calls', label: 'Activité 3CX' },
   { id: 'calls-daily', label: 'Appels 3CX du jour' },
   { id: 'calls-rankings', label: 'Classements 3CX du jour' },
 ];
+
+const ENCAISSEMENT_PERIOD_LABELS = {
+  current: 'Mois actuel',
+  '3m': '3 derniers mois',
+  '6m': '6 derniers mois',
+  '1y': '12 derniers mois',
+};
+const ENCAISSEMENT_GROUPS = [
+  { id: 'gestionnaires', label: 'Gestionnaires' },
+  { id: 'responsables', label: 'Responsables' },
+  { id: 'clients', label: 'Clients' },
+];
+
+function TVEncaissementSlide({ period }) {
+  const [state, setState] = useState({ loading: true, error: '', data: null });
+
+  useEffect(() => {
+    let mounted = true;
+    Promise.all(ENCAISSEMENT_GROUPS.map((group) => (
+      apiFetch(`/classement/encaissements?period=${period}&group=${group.id}`)
+    )))
+      .then((results) => mounted && setState({ loading: false, error: '', data: results }))
+      .catch((error) => mounted && setState({ loading: false, error: error.message, data: null }));
+    return () => {
+      mounted = false;
+    };
+  }, [period]);
+
+  if (state.loading) return <div className="py-24 text-center text-xl text-slate-300">Chargement des encaissements…</div>;
+  if (state.error) return <EmptyState title="Encaissements indisponibles" description={state.error} />;
+
+  return (
+    <section className="min-h-screen px-4">
+      <TVSlideHeading eyebrow="Classement par encaissement" title={ENCAISSEMENT_PERIOD_LABELS[period]} subtitle="Du plus grand au plus petit encaissement" />
+      <div className="mx-auto grid max-w-[2400px] gap-4 xl:grid-cols-3">
+        {ENCAISSEMENT_GROUPS.map((group, groupIndex) => {
+          const rows = (state.data[groupIndex]?.rows || []).slice(0, 10);
+          const max = rows[0]?.encaissement || 0;
+          return (
+            <div key={group.id} className="rounded-3xl border border-cyan-300/20 bg-slate-900/70 p-4 shadow-xl">
+              <div className="mb-3 flex items-center justify-between border-b border-white/10 pb-2">
+                <p className="text-sm font-bold uppercase tracking-[0.25em] text-cyan-300">{group.label}</p>
+                <p className="text-[10px] uppercase tracking-wide text-slate-400">Encaissement <span className="text-emerald-300">/ Commission</span></p>
+              </div>
+              {rows.length ? (
+                <div className="space-y-2">
+                  {rows.map((row, index) => (
+                    <div key={`${row.nom}-${index}`} className="rounded-2xl border border-white/10 bg-black/20 px-3 py-2">
+                      <div className="flex items-center gap-3 text-white">
+                        <span className="w-8 text-center text-sm font-black text-cyan-200">#{index + 1}</span>
+                        <span className="min-w-0 flex-1 truncate font-semibold">{row.nom}</span>
+                        <div className="text-right leading-tight">
+                          <p className="font-black">{formatCurrencyPrecise(row.encaissement)}</p>
+                          <p className="text-xs font-bold text-emerald-300">{formatCurrencyPrecise(row.commission)}</p>
+                        </div>
+                      </div>
+                      <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-white/10">
+                        <div className="h-full rounded-full bg-gradient-to-r from-cyan-400 to-violet-500" style={{ width: `${max > 0 ? (row.encaissement / max) * 100 : 0}%` }} />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="py-8 text-center text-slate-400">
+                  {period === 'current' ? 'Importez le classement du mois.' : 'Importez le fichier des encaissements globaux.'}
+                </p>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
 
 function TVSlideHeading({ eyebrow, title, subtitle }) {
   return (
@@ -1822,11 +1907,25 @@ function TVDailyRankingsSlide({ date, onDateChange, data, loading, error }) {
               </span>
             </div>
           </div>
-          <div className="grid gap-3 xl:grid-cols-2">
-            <TVDailyRankingCard title="🔴 Entrants non répondus — priorité" managers={managers} direction="entrants" metric="nonRepondus" priority />
-            <TVDailyRankingCard title="🥇 Entrants répondus" managers={managers} direction="entrants" metric="repondus" />
-            <TVDailyRankingCard title="🥇 Sortants répondus" managers={managers} direction="sortants" metric="repondus" />
-            <TVDailyRankingCard title="Sortants non répondus" managers={managers} direction="sortants" metric="nonRepondus" />
+          <div className="space-y-5">
+            <section aria-labelledby="daily-inbound-rankings">
+              <h2 id="daily-inbound-rankings" className="mb-3 border-b border-cyan-300/20 pb-2 text-xl font-black text-cyan-100 md:text-2xl">
+                Statistiques des appels entrants
+              </h2>
+              <div className="grid gap-3 xl:grid-cols-2">
+                <TVDailyRankingCard title="🔴 Entrants non répondus — priorité" managers={managers} direction="entrants" metric="nonRepondus" priority />
+                <TVDailyRankingCard title="🥇 Entrants répondus" managers={managers} direction="entrants" metric="repondus" />
+              </div>
+            </section>
+            <section aria-labelledby="daily-outbound-rankings">
+              <h2 id="daily-outbound-rankings" className="mb-3 border-b border-cyan-300/20 pb-2 text-xl font-black text-cyan-100 md:text-2xl">
+                Statistiques des appels sortants
+              </h2>
+              <div className="grid gap-3 xl:grid-cols-2">
+                <TVDailyRankingCard title="🥇 Sortants répondus" managers={managers} direction="sortants" metric="repondus" />
+                <TVDailyRankingCard title="Sortants non répondus" managers={managers} direction="sortants" metric="nonRepondus" />
+              </div>
+            </section>
           </div>
         </>
       )}
@@ -1856,8 +1955,13 @@ function TVSlideContent({ screenId, dailyCallsProps }) {
       return <TVPortfolioSlide variant="responsables" />;
     case 'portfolio-clients':
       return <TVPortfolioSlide variant="clients" />;
+    case 'encaissement-current':
+    case 'encaissement-3m':
+    case 'encaissement-6m':
+    case 'encaissement-1y':
+      return <TVEncaissementSlide period={tvScreens.find((screen) => screen.id === screenId).period} />;
     case 'calls':
-      return <TVCallsPodiumSlide />;
+      return <TVCallsPodiumSlide />
     case 'calls-daily':
       return <TVDailyCallsSlide {...dailyCallsProps} />;
     case 'calls-rankings':

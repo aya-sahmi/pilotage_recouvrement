@@ -158,6 +158,85 @@ async function parseClientsRankingWorkbook(fileBuffer) {
   };
 }
 
+function parseFlexibleDate(value) {
+  if (!value) return null;
+  if (value instanceof Date) {
+    return Number.isNaN(value.getTime()) ? null : value.toISOString().slice(0, 10);
+  }
+  if (typeof value === 'number') {
+    const date = new Date(Math.round((value - 25569) * 86400 * 1000));
+    return Number.isNaN(date.getTime()) ? null : date.toISOString().slice(0, 10);
+  }
+  const text = String(value).trim();
+  const fr = text.match(/^(\d{1,2})[/.-](\d{1,2})[/.-](\d{4})/);
+  if (fr) return `${fr[3]}-${fr[2].padStart(2, '0')}-${fr[1].padStart(2, '0')}`;
+  const iso = text.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  return iso ? `${iso[1]}-${iso[2]}-${iso[3]}` : null;
+}
+
+function cellText(value) {
+  if (value && typeof value === 'object' && !(value instanceof Date)) {
+    return normalizeText(value.result ?? value.text ?? '');
+  }
+  return normalizeText(value);
+}
+
+async function parseEncaissementsWorkbook(fileBuffer) {
+  const workbook = new ExcelJS.Workbook();
+  await workbook.xlsx.load(fileBuffer);
+  const sheet = workbook.worksheets[0];
+  if (!sheet) throw invalidRankingWorkbook('Le fichier Excel ne contient aucune feuille.');
+
+  const { headers, records } = getWorkbookRecords(sheet);
+  const amountFields = ['montant_encaisse', 'montant_encaisse_', 'montant', 'encaissement'];
+  const missing = [];
+  if (!amountFields.some((header) => headers.includes(header))) missing.push('Montant encaisse');
+  if (!headers.includes('date')) missing.push('Date');
+  if (!headers.includes('gestionnaire')) missing.push('Gestionnaire');
+  if (missing.length) {
+    throw invalidRankingWorkbook(`Colonnes manquantes : ${missing.join(', ')}.`);
+  }
+
+  const resolveValue = (value) => (value && typeof value === 'object' && !(value instanceof Date)
+    ? (value.result ?? value.text ?? 0)
+    : value);
+
+  let skipped = 0;
+  const rows = records.flatMap(({ record }) => {
+    const gestionnaire = cellText(record.gestionnaire);
+    const date = parseFlexibleDate(resolveValue(record.date));
+    const montant = normalizeNumber(resolveValue(getRequiredField(record, amountFields)));
+    const isEmpty = !gestionnaire && !cellText(record.client) && !montant;
+    if (isEmpty || isTotalRow(gestionnaire) || isTotalRow(cellText(record.client))) return [];
+    if (!date) {
+      skipped += 1;
+      return [];
+    }
+
+    return [{
+      idInterne: cellText(record.id_interne) || null,
+      idExterne: cellText(record.id_externe) || null,
+      client: cellText(record.client),
+      debiteur: cellText(record.debiteur),
+      montant,
+      taux: normalizeNumber(resolveValue(record.taux)),
+      commission: normalizeNumber(resolveValue(record.commission)),
+      mode: cellText(record.mode_de_reglement),
+      statut: cellText(record.statut),
+      gestionnaire,
+      responsable: cellText(record.responsable),
+      date,
+    }];
+  });
+
+  if (!rows.length) throw invalidRankingWorkbook('Aucune ligne d’encaissement importable n’a été trouvée.');
+
+  return {
+    rows,
+    stats: { lignes: rows.length + skipped, importees: rows.length, erreurs: skipped, statut: 'OK' },
+  };
+}
+
 function normalizeDate(value) {
   if (!value) return '';
   if (value instanceof Date) return value.toISOString().slice(0, 10);
@@ -301,4 +380,5 @@ module.exports = {
   parsePortefeuilleWorkbook,
   parseResponsablesRankingWorkbook,
   parseClientsRankingWorkbook,
+  parseEncaissementsWorkbook,
 };

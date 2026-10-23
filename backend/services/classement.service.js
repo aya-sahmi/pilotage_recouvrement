@@ -145,8 +145,194 @@ async function getLatestClientRanking() {
   return { import: latestImport, rows };
 }
 
+let encaissementTablesReady = null;
+
+function ensureEncaissementTables() {
+  if (!encaissementTablesReady) {
+    encaissementTablesReady = (async () => {
+      await query(`CREATE TABLE IF NOT EXISTS encaissements_imports (
+        id SERIAL PRIMARY KEY,
+        nom_fichier TEXT,
+        nombre_lignes INTEGER NOT NULL DEFAULT 0,
+        date_import TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )`);
+      await query(`CREATE TABLE IF NOT EXISTS encaissements (
+        id SERIAL PRIMARY KEY,
+        import_id INTEGER NOT NULL REFERENCES encaissements_imports(id) ON DELETE CASCADE,
+        id_interne TEXT,
+        id_externe TEXT,
+        client TEXT,
+        debiteur TEXT,
+        montant NUMERIC(14,2) NOT NULL DEFAULT 0,
+        taux NUMERIC(10,4) NOT NULL DEFAULT 0,
+        commission NUMERIC(14,2) NOT NULL DEFAULT 0,
+        mode_reglement TEXT,
+        statut TEXT,
+        gestionnaire TEXT,
+        responsable TEXT,
+        date_encaissement DATE NOT NULL
+      )`);
+      await query('CREATE INDEX IF NOT EXISTS idx_encaissements_date ON encaissements (import_id, date_encaissement)');
+    })().catch((error) => {
+      encaissementTablesReady = null;
+      throw error;
+    });
+  }
+  return encaissementTablesReady;
+}
+
+// Le fichier est cumulatif (1er janvier → aujourd'hui) : chaque import remplace le précédent.
+async function persistEncaissementsImport({ fileName, rows }) {
+  await ensureEncaissementTables();
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query('DELETE FROM encaissements_imports');
+    const { rows: created } = await client.query(
+      'INSERT INTO encaissements_imports (nom_fichier, nombre_lignes) VALUES ($1, $2) RETURNING id',
+      [fileName, rows.length]
+    );
+    const importId = created[0].id;
+
+    const chunkSize = 500;
+    for (let start = 0; start < rows.length; start += chunkSize) {
+      const chunk = rows.slice(start, start + chunkSize);
+      const values = [];
+      const placeholders = chunk.map((row, index) => {
+        const base = index * 13;
+        values.push(
+          importId, row.idInterne, row.idExterne, row.client, row.debiteur, row.montant, row.taux,
+          row.commission, row.mode, row.statut, row.gestionnaire, row.responsable, row.date
+        );
+        return `(${Array.from({ length: 13 }, (_, i) => `$${base + i + 1}`).join(', ')})`;
+      });
+      await client.query(
+        `INSERT INTO encaissements (
+           import_id, id_interne, id_externe, client, debiteur, montant, taux, commission,
+           mode_reglement, statut, gestionnaire, responsable, date_encaissement
+         ) VALUES ${placeholders.join(', ')}`,
+        values
+      );
+    }
+
+    await client.query('COMMIT');
+    return { importId, importedCount: rows.length };
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+const PERIOD_MONTHS = { '3m': 3, '6m': 6, '1y': 12 };
+const GROUP_COLUMNS = {
+  gestionnaires: 'gestionnaire',
+  responsables: 'responsable',
+  clients: 'client',
+};
+
+async function getEncaissementRanking(period, group) {
+  const column = GROUP_COLUMNS[group];
+  const months = PERIOD_MONTHS[period];
+  if (!column || !months) {
+    const error = new Error('Période ou type de classement invalide.');
+    error.statusCode = 400;
+    throw error;
+  }
+
+  await ensureEncaissementTables();
+  const { rows: imports } = await query(
+    'SELECT id, nom_fichier, date_import FROM encaissements_imports ORDER BY date_import DESC, id DESC LIMIT 1'
+  );
+  const latestImport = imports[0];
+  if (!latestImport) return { import: null, from: null, rows: [] };
+
+  const { rows } = await query(
+    `SELECT MIN(TRIM(${column})) AS nom,
+            SUM(montant) AS encaissement,
+            SUM(commission) AS commission,
+            COUNT(*)::int AS nombre
+     FROM encaissements
+     WHERE import_id = $1
+       AND date_encaissement >= (CURRENT_DATE - ($2 || ' months')::interval)::date
+       AND COALESCE(TRIM(${column}), '') <> ''
+     GROUP BY LOWER(TRIM(${column}))
+     ORDER BY SUM(montant) DESC, MIN(TRIM(${column})) ASC`,
+    [latestImport.id, String(months)]
+  );
+
+  return {
+    import: latestImport,
+    rows: rows.map((row) => ({
+      nom: row.nom,
+      encaissement: Number(row.encaissement || 0),
+      commission: Number(row.commission || 0),
+      nombre: row.nombre,
+    })),
+  };
+}
+
+// Mois actuel : issu des classements importés (gestionnaires, responsables, clients).
+async function getCurrentMonthRanking(group) {
+  if (group === 'responsables') {
+    const { import: rankingImport, rows } = await getLatestResponsibleRanking();
+    return {
+      import: rankingImport,
+      rows: rows
+        .map((row) => ({
+          nom: row.nom_affichage || `${row.prenom || ''} ${row.nom || ''}`.trim(),
+          encaissement: Number(row.encaissement || 0),
+          commission: Number(row.commission || 0),
+        }))
+        .sort((a, b) => b.encaissement - a.encaissement),
+    };
+  }
+
+  if (group === 'clients') {
+    const { import: rankingImport, rows } = await getLatestClientRanking();
+    return {
+      import: rankingImport,
+      rows: rows.map((row) => ({
+        nom: row.nom,
+        encaissement: Number(row.encaissement || 0),
+        commission: Number(row.commission_srm || 0),
+      })),
+    };
+  }
+
+  const { rows: latest } = await query(
+    'SELECT MAX(import_id) AS import_id FROM performances WHERE import_id IS NOT NULL'
+  );
+  const importId = latest[0]?.import_id;
+  if (!importId) return { import: null, rows: [] };
+
+  const { rows } = await query(
+    `SELECT COALESCE(NULLIF(TRIM(g.nom_affichage), ''), p.nom_source) AS nom,
+            SUM(p.encaissement) AS encaissement, SUM(p.commission) AS commission
+     FROM performances p
+     LEFT JOIN gestionnaires g ON g.id = p.gestionnaire_id
+     WHERE p.import_id = $1
+     GROUP BY COALESCE(NULLIF(TRIM(g.nom_affichage), ''), p.nom_source)
+     ORDER BY SUM(p.encaissement) DESC`,
+    [importId]
+  );
+  return {
+    import: { id: importId },
+    rows: rows.map((row) => ({
+      nom: row.nom,
+      encaissement: Number(row.encaissement || 0),
+      commission: Number(row.commission || 0),
+    })),
+  };
+}
+
 module.exports = {
   persistRankingImport,
   getLatestResponsibleRanking,
   getLatestClientRanking,
+  persistEncaissementsImport,
+  ensureEncaissementTables,
+  getEncaissementRanking,
+  getCurrentMonthRanking,
 };

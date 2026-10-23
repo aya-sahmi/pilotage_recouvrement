@@ -1,4 +1,5 @@
 const { getPerformanceDashboard } = require('../services/performance.service');
+const { getEncaissementRanking, getCurrentMonthRanking } = require('../services/classement.service');
 
 async function getClassement(req, res, next) {
   try {
@@ -22,6 +23,20 @@ async function getClassement(req, res, next) {
   }
 }
 
+async function getEncaissementsClassement(req, res, next) {
+  try {
+    const period = String(req.query.period || 'current');
+    const group = String(req.query.group || 'gestionnaires');
+    const data = period === 'current'
+      ? await getCurrentMonthRanking(group)
+      : await getEncaissementRanking(period, group);
+    res.json({ success: true, data: { period, group, ...data } });
+  } catch (error) {
+    next(error);
+  }
+}
+
 module.exports = {
   getClassement,
+  getEncaissementsClassement,
 };

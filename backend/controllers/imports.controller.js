@@ -3,9 +3,10 @@ const {
   parsePortefeuilleWorkbook,
   parseResponsablesRankingWorkbook,
   parseClientsRankingWorkbook,
+  parseEncaissementsWorkbook,
 } = require('../services/excel-import.service');
 const { pool, query } = require('../config/database');
-const { persistRankingImport } = require('../services/classement.service');
+const { persistRankingImport, persistEncaissementsImport, ensureEncaissementTables } = require('../services/classement.service');
 
 function normalizeImportStatus(status) {
   if (!status) return 'TERMINE';
@@ -304,8 +305,29 @@ async function importClientsRanking(req, res, next) {
   }
 }
 
+async function importEncaissements(req, res, next) {
+  try {
+    const file = req.file || req.files?.[0];
+    if (!file) {
+      return res.status(400).json({ success: false, message: 'Veuillez fournir un fichier Excel.', error: 'MISSING_FILE' });
+    }
+
+    const parsed = await parseEncaissementsWorkbook(file.buffer || file.data);
+    const result = await persistEncaissementsImport({ fileName: file.originalname, rows: parsed.rows });
+
+    res.json({
+      success: true,
+      data: { stats: parsed.stats, import_id: result.importId },
+      message: 'Import des encaissements terminé.',
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
 async function getImports(req, res, next) {
   try {
+    await ensureEncaissementTables();
     const { rows } = await query(`
       SELECT id, 'standard' AS source, type_import::text AS type_import, nom_fichier, date_import, nombre_lignes,
              nombre_lignes_importees, nombre_lignes_erreur, statut::text AS statut
@@ -320,6 +342,11 @@ async function getImports(req, res, next) {
              nombre_lignes, nombre_lignes AS nombre_lignes_importees,
              0 AS nombre_lignes_erreur, 'TERMINE' AS statut
       FROM classement_clients_imports
+      UNION ALL
+      SELECT id, 'encaissements' AS source, 'ENCAISSEMENTS GLOBAL' AS type_import, nom_fichier, date_import,
+             nombre_lignes, nombre_lignes AS nombre_lignes_importees,
+             0 AS nombre_lignes_erreur, 'TERMINE' AS statut
+      FROM encaissements_imports
       ORDER BY date_import DESC
       LIMIT 50
     `);
@@ -334,6 +361,7 @@ const IMPORT_SOURCES = {
   standard: { table: 'imports', children: ['performances', 'dossiers'] },
   responsables: { table: 'classement_responsables_imports', children: ['classement_responsables'] },
   clients: { table: 'classement_clients_imports', children: ['classement_clients'] },
+  encaissements: { table: 'encaissements_imports', children: ['encaissements'] },
 };
 
 async function deleteImport(req, res, next) {
@@ -378,6 +406,7 @@ module.exports = {
   importPortefeuille,
   importResponsablesRanking,
   importClientsRanking,
+  importEncaissements,
   getImports,
   deleteImport,
 };

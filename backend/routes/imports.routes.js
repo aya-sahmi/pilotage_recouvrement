@@ -5,6 +5,7 @@ const {
   importPortefeuille,
   importResponsablesRanking,
   importClientsRanking,
+  importEncaissements,
   getImports,
   deleteImport,
 } = require('../controllers/imports.controller');
@@ -26,5 +27,6 @@ router.post('/performance', upload.single('file'), importPerformance);
 router.post('/portefeuille', upload.single('file'), importPortefeuille);
 router.post('/responsables', upload.single('file'), importResponsablesRanking);
 router.post('/clients', upload.single('file'), importClientsRanking);
+router.post('/encaissements', upload.single('file'), importEncaissements);
 
 module.exports = router;
