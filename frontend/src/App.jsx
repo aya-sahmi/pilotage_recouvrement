@@ -631,19 +631,16 @@ function ImportsPage() {
         </div>
         <div className="rounded-3xl border border-white/10 bg-white/5 p-5">
           <h3 className="mb-2 text-xl font-bold text-white">Type 3 : Classement des responsables</h3>
-          <p className="mb-4 text-sm text-slate-400">Colonnes : Nom et Prenom, Encaissement, Commission, Objectif. Le taux est calculé automatiquement. La ligne Total est ignorée. Photo URL est facultative ; une photo déjà enregistrée est conservée si la cellule est vide.</p>
           <input type="file" accept=".xlsx,.xls" onChange={(e) => setFileMap((prev) => ({ ...prev, responsables: e.target.files?.[0] || null }))} className="mb-4 block w-full text-sm text-slate-300 file:mr-4 file:rounded-2xl file:border-0 file:bg-amber-400 file:px-4 file:py-3 file:font-semibold file:text-slate-950" />
           <button onClick={() => submitImport('responsables')} className="rounded-2xl bg-gradient-to-r from-amber-400 to-orange-500 px-4 py-3 font-bold text-slate-950">Importer le classement responsables</button>
         </div>
         <div className="rounded-3xl border border-white/10 bg-white/5 p-5">
           <h3 className="mb-2 text-xl font-bold text-white">Type 4 : Classement des clients</h3>
-          <p className="mb-4 text-sm text-slate-400">Colonnes : Nom client, Encaissement, Commission SRM. La ligne Total est ignorée. Photo URL est facultative ; une photo déjà enregistrée est conservée si la cellule est vide.</p>
           <input type="file" accept=".xlsx,.xls" onChange={(e) => setFileMap((prev) => ({ ...prev, clients: e.target.files?.[0] || null }))} className="mb-4 block w-full text-sm text-slate-300 file:mr-4 file:rounded-2xl file:border-0 file:bg-emerald-400 file:px-4 file:py-3 file:font-semibold file:text-slate-950" />
           <button onClick={() => submitImport('clients')} className="rounded-2xl bg-gradient-to-r from-emerald-400 to-teal-500 px-4 py-3 font-bold text-slate-950">Importer le classement clients</button>
         </div>
         <div className="rounded-3xl border border-white/10 bg-white/5 p-5 xl:col-span-2">
           <h3 className="mb-2 text-xl font-bold text-white">Type 5 : Encaissements globaux (1er janvier → aujourd’hui)</h3>
-          <p className="mb-4 text-sm text-slate-400">Colonnes : ID Interne, ID Externe, Client, Débiteur, Montant encaisse, Taux, Commission, Mode de règlement, Statut, Gestionnaire, Date, Responsable. Chaque import remplace le précédent. Alimente les classements 3 mois, 6 mois et 1 an du dashboard.</p>
           <input type="file" accept=".xlsx" onChange={(e) => setFileMap((prev) => ({ ...prev, encaissements: e.target.files?.[0] || null }))} className="mb-4 block w-full text-sm text-slate-300 file:mr-4 file:rounded-2xl file:border-0 file:bg-fuchsia-400 file:px-4 file:py-3 file:font-semibold file:text-slate-950" />
           <button onClick={() => submitImport('encaissements')} className="rounded-2xl bg-gradient-to-r from-fuchsia-400 to-pink-500 px-4 py-3 font-bold text-slate-950">Importer les encaissements</button>
         </div>
