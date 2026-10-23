@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { BrowserRouter, NavLink, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import { AnimatePresence, motion } from 'framer-motion';
 import {
@@ -1104,7 +1104,7 @@ function TVEncaissementSlide({ period }) {
   return (
     <section className="min-h-screen px-4">
       <TVSlideHeading eyebrow="Classement par encaissement" title={ENCAISSEMENT_PERIOD_LABELS[period]} subtitle="Du plus grand au plus petit encaissement" />
-      <div className="mx-auto grid max-w-[2400px] gap-4 xl:grid-cols-3">
+      <div className="mx-auto grid max-w-[2400px] gap-4 lg:grid-cols-3">
         {ENCAISSEMENT_GROUPS.map((group, groupIndex) => {
           const rows = (state.data[groupIndex]?.rows || []).slice(0, 10);
           const max = rows[0]?.encaissement || 0;
@@ -1147,10 +1147,10 @@ function TVEncaissementSlide({ period }) {
 
 function TVSlideHeading({ eyebrow, title, subtitle }) {
   return (
-    <div className="mb-8 text-center">
+    <div className="mb-5 text-center md:mb-8">
       <p className="text-xs font-bold uppercase tracking-[0.45em] text-cyan-300">{eyebrow}</p>
-      <h1 className="mt-3 text-4xl font-black tracking-tight text-white md:text-6xl">{title}</h1>
-      {subtitle && <p className="mt-3 text-lg text-slate-400 md:text-xl">{subtitle}</p>}
+      <h1 className="mt-2 text-2xl font-black tracking-tight text-white sm:text-4xl md:text-6xl">{title}</h1>
+      {subtitle && <p className="mt-2 text-sm text-slate-400 md:text-xl">{subtitle}</p>}
     </div>
   );
 }
@@ -1223,7 +1223,7 @@ function TVRankingSlide({ variant, page = 0 }) {
           eyebrow={`Classement ${page + 1}/4`}
           title={`Gestionnaires #${page * 8 + 1} à #${page * 8 + rows.length}`}
         />
-        <div className="mx-auto grid w-full max-w-[2400px] flex-1 grid-cols-4 content-center gap-4">
+        <div className="mx-auto grid w-full max-w-[2400px] flex-1 grid-cols-2 content-center md:grid-cols-4 gap-4">
           {rows.map((row) => (
             <article key={row.id || row.manager} className="flex flex-col items-center gap-3 rounded-3xl border border-white/10 bg-slate-900/75 px-3 py-5 text-center">
               <span className="rounded-full bg-cyan-500/20 px-4 py-1 text-xl font-black text-cyan-200">#{row.rank}</span>
@@ -1248,9 +1248,9 @@ function TVRankingSlide({ variant, page = 0 }) {
     const topThree = data.rows.slice(0, 3);
     const podiumOrder = [topThree[1], topThree[0], topThree[2]].filter(Boolean);
     const podiumHeights = {
-      1: 'min-h-[52vh]',
-      2: 'min-h-[40vh]',
-      3: 'min-h-[34vh]',
+      1: 'sm:min-h-[52vh]',
+      2: 'sm:min-h-[40vh]',
+      3: 'sm:min-h-[34vh]',
     };
 
     return (
@@ -1266,7 +1266,7 @@ function TVRankingSlide({ variant, page = 0 }) {
                 initial={{ opacity: 0, y: 70, scale: 0.94 }}
                 animate={{ opacity: 1, y: 0, scale: 1 }}
                 transition={{ duration: 0.65, delay: index * 0.16, ease: 'easeOut' }}
-                className={`relative flex ${podiumHeights[rank] || 'min-h-[34vh]'} flex-col items-center justify-center overflow-hidden rounded-[2rem] border p-6 text-center shadow-2xl ${
+                className={`relative flex ${podiumHeights[rank] || 'sm:min-h-[34vh]'} flex-col items-center justify-center overflow-hidden rounded-[2rem] border p-6 text-center shadow-2xl ${
                   isFirst
                     ? 'border-amber-300/60 bg-gradient-to-b from-amber-300/25 via-amber-500/10 to-slate-900/80 shadow-amber-500/10 sm:-translate-y-8'
                     : rank === 2
@@ -1470,7 +1470,7 @@ function TVPortfolioSlide({ variant }) {
                       firstName={row.prenom}
                       lastName={row.nom}
                       photoUrl={row.photo_url}
-                      className="h-20 w-20 text-2xl md:h-24 md:w-24 md:text-3xl 2xl:h-28 2xl:w-28"
+                      className="h-14 w-14 text-xl sm:h-20 sm:w-20 sm:text-2xl md:h-24 md:w-24 md:text-3xl 2xl:h-28 2xl:w-28"
                     />
                     <div className="min-w-0 flex-1">
                       <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
@@ -1573,9 +1573,9 @@ function TVCallsPodiumSlide() {
 
   const podiumOrder = [topThree[1], topThree[0], topThree[2]].filter(Boolean);
   const podiumHeights = {
-    1: 'min-h-[42vh]',
-    2: 'min-h-[34vh]',
-    3: 'min-h-[30vh]',
+    1: 'sm:min-h-[42vh]',
+    2: 'sm:min-h-[34vh]',
+    3: 'sm:min-h-[30vh]',
   };
 
   return (
@@ -1594,7 +1594,7 @@ function TVCallsPodiumSlide() {
               initial={{ opacity: 0, y: 70, scale: 0.94 }}
               animate={{ opacity: 1, y: 0, scale: 1 }}
               transition={{ duration: 0.65, delay: index * 0.16, ease: 'easeOut' }}
-              className={`relative flex ${podiumHeights[rank] || 'min-h-[30vh]'} flex-col items-center justify-center overflow-hidden rounded-[2rem] border p-4 text-center shadow-2xl ${
+              className={`relative flex ${podiumHeights[rank] || 'sm:min-h-[30vh]'} flex-col items-center justify-center overflow-hidden rounded-[2rem] border p-4 text-center shadow-2xl ${
                 isFirst
                   ? 'border-amber-300/60 bg-gradient-to-b from-amber-300/25 via-amber-500/10 to-slate-900/80 shadow-amber-500/10 sm:-translate-y-8'
                   : rank === 2
@@ -1976,6 +1976,7 @@ function TVPage() {
   const [dailyDate, setDailyDate] = useState(() => toLocalDateInputValue(new Date()));
   const [dailyCallsResult, setDailyCallsResult] = useState(null);
   const navigate = useNavigate();
+  const touchStartX = useRef(0);
   const activeScreen = tvScreens[screenIndex];
   const isDailyCallsScreen = activeScreen.id === 'calls-daily' || activeScreen.id === 'calls-rankings';
   const dailyCalls = dailyCallsResult?.date === dailyDate ? dailyCallsResult.data : null;
@@ -2048,10 +2049,10 @@ function TVPage() {
   };
 
   return (
-    <div className="flex min-h-screen flex-col overflow-hidden bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-slate-800 via-slate-950 to-black px-4 py-4 md:px-8 md:py-6">
-      <header className="z-10 flex flex-wrap items-center justify-between gap-4 border-b border-white/10 pb-4">
+    <div className="flex min-h-screen flex-col overflow-hidden bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-slate-800 via-slate-950 to-black px-3 py-3 md:px-8 md:py-6">
+      <header className="z-10 flex flex-wrap items-center justify-between gap-3 border-b border-white/10 pb-3 md:gap-4 md:pb-4">
         <div className="flex items-center gap-4">
-          <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br from-cyan-400 to-indigo-600 text-lg font-black text-white shadow-lg shadow-cyan-500/20">PR</div>
+          <div className="flex hidden h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br from-cyan-400 to-indigo-600 text-lg sm:flex font-black text-white shadow-lg shadow-cyan-500/20">PR</div>
           <div>
             <p className="text-[10px] font-bold uppercase tracking-[0.32em] text-cyan-300">Pilotage recouvrement • Mode TV</p>
             <h2 className="mt-1 text-xl font-black text-white md:text-2xl">{activeScreen.label}</h2>
@@ -2070,18 +2071,18 @@ function TVPage() {
           </button>
           <button onClick={toggleFullscreen} className="flex items-center gap-2 rounded-xl bg-cyan-400 px-4 py-3 text-sm font-black text-slate-950 transition hover:bg-cyan-300">
             {isFullscreen ? <Minimize className="h-4 w-4" /> : <Maximize className="h-4 w-4" />}
-            {isFullscreen ? 'Quitter plein écran' : 'Plein écran'}
+            <span className="hidden sm:inline">{isFullscreen ? 'Quitter plein écran' : 'Plein écran'}</span>
           </button>
           <button onClick={leaveTVMode} className="flex items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm font-bold text-slate-200 transition hover:bg-white/15">
             <ArrowLeft className="h-4 w-4" />
-            Quitter TV
+            <span className="hidden sm:inline">Quitter TV</span>
           </button>
         </div>
       </header>
 
       {fullscreenError && <p role="alert" className="mt-3 text-right text-sm text-rose-300">{fullscreenError}</p>}
 
-      <main className="flex-1">
+      <main className="flex-1" onTouchStart={(event) => { touchStartX.current = event.touches[0].clientX; }} onTouchEnd={(event) => { const delta = event.changedTouches[0].clientX - touchStartX.current; if (Math.abs(delta) > 70) changeScreen(delta < 0 ? 1 : -1); }}>
         <AnimatePresence mode="wait">
           <motion.div
             key={activeScreen.id}
